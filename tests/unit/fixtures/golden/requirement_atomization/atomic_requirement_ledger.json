@@ -1,0 +1,60 @@
+{
+  "atomic_ledger_id": "atomic_ledger_001",
+  "candidate_package_id": "cand_pkg_001",
+  "project_id": "demo_chatbot",
+  "requirements": [
+    {
+      "candidate_ids": [
+        "cand_001"
+      ],
+      "origin": "source_derived",
+      "requirement_id": "req_001",
+      "requirement_type": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001",
+          "location": "requirements.md:1",
+          "quote": "The bot must collect an order number and provide order status."
+        }
+      ],
+      "statement": "The bot must collect an order number.",
+      "status": "atomic_draft"
+    },
+    {
+      "candidate_ids": [
+        "cand_001"
+      ],
+      "origin": "source_derived",
+      "requirement_id": "req_002",
+      "requirement_type": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001",
+          "location": "requirements.md:1",
+          "quote": "The bot must collect an order number and provide order status."
+        }
+      ],
+      "statement": "The bot must provide order status.",
+      "status": "atomic_draft"
+    },
+    {
+      "candidate_ids": [
+        "cand_002"
+      ],
+      "origin": "source_derived",
+      "requirement_id": "req_003",
+      "requirement_type": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_002",
+          "document_id": "doc_001",
+          "location": "requirements.md:2"
+        }
+      ],
+      "statement": "The bot must escalate billing disputes to a human agent.",
+      "status": "atomic_draft"
+    }
+  ]
+}

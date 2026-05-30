@@ -1,0 +1,34 @@
+{
+  "candidate_package_id": "cand_pkg_001",
+  "candidates": [
+    {
+      "candidate_id": "cand_001",
+      "confidence": 0.91,
+      "requirement_type_guess": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001",
+          "location": "requirements.md:1",
+          "quote": "The bot must collect an order number and provide order status."
+        }
+      ],
+      "statement": "The bot must collect an order number and provide order status."
+    },
+    {
+      "candidate_id": "cand_002",
+      "confidence": 0.88,
+      "requirement_type_guess": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_002",
+          "document_id": "doc_001",
+          "location": "requirements.md:2"
+        }
+      ],
+      "statement": "The bot must escalate billing disputes to a human agent."
+    }
+  ],
+  "project_id": "demo_chatbot",
+  "source_package_id": "source_pkg_001"
+}
