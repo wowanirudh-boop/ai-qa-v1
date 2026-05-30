@@ -1,0 +1,8 @@
+{
+  "entrypoint": "tests.fake_requirement_extraction",
+  "input_contract": "SourcePackage",
+  "name": "Fake Requirement Extraction",
+  "output_contract": "CandidateRequirementPackage",
+  "skill_id": "fake_requirement_extraction_v1",
+  "version": "1.0.0"
+}

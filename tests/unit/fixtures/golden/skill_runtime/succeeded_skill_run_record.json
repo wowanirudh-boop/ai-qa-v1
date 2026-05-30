@@ -1,0 +1,11 @@
+{
+  "input_artifact_paths": [
+    "artifacts/demo_chatbot/run_001/02_source_package/source_package.json"
+  ],
+  "output_artifact_paths": [
+    "artifacts/demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json"
+  ],
+  "skill_id": "fake_requirement_extraction_v1",
+  "skill_run_id": "skill_run_001",
+  "status": "succeeded"
+}

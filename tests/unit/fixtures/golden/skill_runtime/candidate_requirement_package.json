@@ -1,0 +1,19 @@
+{
+  "candidate_package_id": "cand_pkg_001",
+  "candidates": [
+    {
+      "candidate_id": "cand_001",
+      "confidence": 0.91,
+      "requirement_type_guess": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "statement": "The bot must ask for an order number before helping with order status."
+    }
+  ],
+  "project_id": "demo_chatbot",
+  "source_package_id": "source_pkg_001"
+}
