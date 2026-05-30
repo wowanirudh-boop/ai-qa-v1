@@ -5,7 +5,9 @@ description = "Architecture bootstrap for a chatbot requirements-to-test compile
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+ai-testgen = "ai_testgen.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-
