@@ -1,0 +1,11 @@
+[project]
+name = "ai-testgen"
+version = "0.1.0"
+description = "Architecture bootstrap for a chatbot requirements-to-test compiler."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
