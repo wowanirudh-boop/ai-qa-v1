@@ -1,0 +1,103 @@
+{
+  "ProjectConfig": {
+    "project_id": "demo_chatbot",
+    "bot_name": "Demo Support Bot",
+    "target_url": "https://example.test/chat",
+    "coverage_policy": {
+      "require_positive_tests": true
+    },
+    "approval_policy": {
+      "allow_export_without_review": false
+    }
+  },
+  "SourceChunk": {
+    "chunk_id": "chunk_001",
+    "document_id": "doc_001",
+    "text": "The bot must ask for an order number.",
+    "checksum": "sha256:def456",
+    "processing_status": "not_processed"
+  },
+  "AtomicRequirement": {
+    "requirement_id": "req_001",
+    "statement": "The bot asks for an order number.",
+    "requirement_type": "functional",
+    "status": "validated",
+    "origin": "source_derived",
+    "source_refs": [
+      {
+        "document_id": "doc_001",
+        "chunk_id": "chunk_001"
+      }
+    ]
+  },
+  "TestObligation": {
+    "obligation_id": "obl_001",
+    "requirement_id": "req_001",
+    "obligation_type": "positive",
+    "status": "planned",
+    "source_refs": [
+      {
+        "document_id": "doc_001",
+        "chunk_id": "chunk_001"
+      }
+    ]
+  },
+  "TestCase": {
+    "test_case_id": "tc_001",
+    "title": "Order status requires order number",
+    "status": "approved",
+    "requirement_ids": [
+      "req_001"
+    ],
+    "obligation_ids": [
+      "obl_001"
+    ],
+    "turns": [
+      {
+        "turn_id": "turn_001",
+        "speaker": "user",
+        "text": "Where is my order?"
+      }
+    ],
+    "assertions": [
+      {
+        "assertion_id": "assert_001",
+        "assertion_type": "bot_response_contains_request",
+        "target": "bot.final_response",
+        "expected": "The bot asks for the order number."
+      }
+    ],
+    "source_refs": [
+      {
+        "document_id": "doc_001",
+        "chunk_id": "chunk_001"
+      }
+    ],
+    "export_eligible": true
+  },
+  "CoverageReport": {
+    "coverage_report_id": "coverage_001",
+    "project_id": "demo_chatbot",
+    "validated_suite_id": "validated_suite_001",
+    "requirement_counts": {
+      "total": 1,
+      "covered": 1,
+      "uncovered": 0
+    },
+    "obligation_counts": {
+      "total": 1,
+      "covered": 1,
+      "blocked": 0
+    },
+    "test_counts": {
+      "total": 1,
+      "export_eligible": 1,
+      "rejected": 0
+    },
+    "source_chunk_counts": {
+      "total": 1,
+      "with_requirements": 1,
+      "without_requirements": 0
+    }
+  }
+}
