@@ -6,6 +6,11 @@ from pathlib import Path
 
 from ai_testgen.document_ingestion import DocumentIngestionError, ingest_documents_from_config_artifact
 from ai_testgen.project_config import ProjectConfigError, load_project_config, save_project_config
+from ai_testgen.requirement_extraction import (
+    DEFAULT_SKILL_DEFINITION_PATH,
+    RequirementExtractionError,
+    extract_requirements_from_source_package_artifact,
+)
 from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
 
 
@@ -30,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     source_package_parser.add_argument("--documents", required=True, type=Path)
     source_package_parser.set_defaults(func=_build_source_package)
 
+    extract_parser = subcommands.add_parser("extract-requirements")
+    extract_parser.add_argument("--source-package", required=True, type=Path)
+    extract_parser.add_argument("--skill-definition", type=Path, default=DEFAULT_SKILL_DEFINITION_PATH)
+    extract_parser.set_defaults(func=_extract_requirements)
+
     return parser
 
 
@@ -39,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except (ProjectConfigError, DocumentIngestionError, SourceLedgerError) as exc:
+    except (ProjectConfigError, DocumentIngestionError, SourceLedgerError, RequirementExtractionError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -60,6 +70,12 @@ def _ingest_documents(args: argparse.Namespace) -> int:
 def _build_source_package(args: argparse.Namespace) -> int:
     written = build_source_package_from_documents_artifact(args.documents)
     print(f"Built source package saved to {written.path}")
+    return 0
+
+
+def _extract_requirements(args: argparse.Namespace) -> int:
+    result = extract_requirements_from_source_package_artifact(args.source_package, args.skill_definition)
+    print(f"Extracted candidate requirements saved to {result.candidate_package_path}")
     return 0
 
 
