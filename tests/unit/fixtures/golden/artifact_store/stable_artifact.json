@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "a": "first",
+      "z": "last"
+    }
+  ],
+  "nested": {
+    "a": true,
+    "b": false
+  },
+  "zeta": 3
+}
