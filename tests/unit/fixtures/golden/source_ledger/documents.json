@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "content_checksum": "sha256:1d0cff1ff0ad2c517b6f1ecbbec71150073974766be3c3439174d86b7c073a30",
+      "content_type": "text/markdown",
+      "document_id": "doc_001",
+      "ingestion_status": "loaded",
+      "metadata": {
+        "encoding": "utf-8"
+      },
+      "project_id": "demo_chatbot",
+      "size_bytes": 121,
+      "source_path": "requirements.md",
+      "title": "Requirements"
+    }
+  ],
+  "project_id": "demo_chatbot"
+}

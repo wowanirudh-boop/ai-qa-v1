@@ -1,0 +1,26 @@
+{
+  "checksum": "sha256:48f88e6f1ac04a58874a4deb224721d414b1609c95b0ec236becac55675c8f19",
+  "chunks": [
+    {
+      "checksum": "sha256:06355c053b1f0ed4951b80242d0d10bff8d170d0f41c2c87cd4e1879421c3d23",
+      "chunk_id": "chunk_001",
+      "document_id": "doc_001",
+      "processing_status": "not_processed",
+      "sequence": 1,
+      "text": "The bot must ask for an order number before showing order status."
+    },
+    {
+      "checksum": "sha256:f1c7dcbfb565fa4dda82875fa3b909b60b561cdf4bc97c0206c3ee673d8add32",
+      "chunk_id": "chunk_002",
+      "document_id": "doc_001",
+      "processing_status": "not_processed",
+      "sequence": 2,
+      "text": "The bot must explain when an order number is invalid."
+    }
+  ],
+  "document_ids": [
+    "doc_001"
+  ],
+  "project_id": "demo_chatbot",
+  "source_package_id": "source_pkg_001"
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_testgen.document_ingestion import DocumentIngestionError, ingest_documents_from_config_artifact
 from ai_testgen.project_config import ProjectConfigError, load_project_config, save_project_config
+from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--config", required=True, type=Path)
     ingest_parser.set_defaults(func=_ingest_documents)
 
+    source_package_parser = subcommands.add_parser("build-source-package")
+    source_package_parser.add_argument("--documents", required=True, type=Path)
+    source_package_parser.set_defaults(func=_build_source_package)
+
     return parser
 
 
@@ -34,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except (ProjectConfigError, DocumentIngestionError) as exc:
+    except (ProjectConfigError, DocumentIngestionError, SourceLedgerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -49,6 +54,12 @@ def _validate_config(args: argparse.Namespace) -> int:
 def _ingest_documents(args: argparse.Namespace) -> int:
     written = ingest_documents_from_config_artifact(args.config)
     print(f"Ingested documents saved to {written.path}")
+    return 0
+
+
+def _build_source_package(args: argparse.Namespace) -> int:
+    written = build_source_package_from_documents_artifact(args.documents)
+    print(f"Built source package saved to {written.path}")
     return 0
 
 
