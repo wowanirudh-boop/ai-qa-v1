@@ -34,6 +34,7 @@ CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME = "candidate_requirement_package"
 ATOMIC_REQUIREMENTS_STAGE = "04_atomic_requirements"
 ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME = "atomic_requirement_ledger"
 RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME = "atomic_requirement_ledger_skill_output"
+DEFAULT_SKILL_DEFINITION_PATH = Path("skills") / "requirement_atomization_v1.json"
 REQUIREMENT_ATOMIZATION_INPUT_CONTRACT = "CandidateRequirementPackage"
 REQUIREMENT_ATOMIZATION_OUTPUT_CONTRACT = "AtomicRequirementLedger"
 ATOMIC_LEDGER_ID = "atomic_ledger_001"
@@ -117,8 +118,8 @@ class RequirementAtomizationPersistenceError(RequirementAtomizationError):
 class RequirementAtomizationResult:
     atomic_ledger: AtomicRequirementLedger
     atomic_ledger_path: Path
-    skill_run_record: SkillRunRecord | None = None
-    skill_run_record_path: Path | None = None
+    skill_run_record: SkillRunRecord
+    skill_run_record_path: Path
 
 
 def atomize_requirements_from_candidate_package_artifact(
@@ -138,21 +139,13 @@ def atomize_requirements_from_candidate_package_artifact(
             f"{candidate_package.project_id}: {candidate_path}"
         )
 
-    if skill_definition is None:
-        atomic_ledger = atomize_candidate_package(candidate_package)
-        written = _write_atomic_ledger(store, run_id=run_id, atomic_ledger=atomic_ledger)
-        return RequirementAtomizationResult(
-            atomic_ledger=atomic_ledger,
-            atomic_ledger_path=written.path,
-        )
-
     atomic_ledger, skill_run_record = _atomize_with_skill(
         store,
         candidate_path=candidate_path,
         candidate_package=candidate_package,
         project_id=project_id,
         run_id=run_id,
-        skill_definition=skill_definition,
+        skill_definition=DEFAULT_SKILL_DEFINITION_PATH if skill_definition is None else skill_definition,
         skill_runtime=skill_runtime,
         skill_run_id=skill_run_id,
     )
@@ -166,7 +159,9 @@ def atomize_requirements_from_candidate_package_artifact(
     )
 
 
-def atomize_candidate_package(candidate_package: CandidateRequirementPackage) -> AtomicRequirementLedger:
+def atomize_candidate_package_deterministic_for_tests(
+    candidate_package: CandidateRequirementPackage,
+) -> AtomicRequirementLedger:
     requirements: list[AtomicRequirement] = []
     next_id = count(1)
     for candidate in candidate_package.candidates:

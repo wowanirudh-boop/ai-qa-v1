@@ -10,11 +10,11 @@ import ai_testgen.requirement_atomization as requirement_atomization
 from ai_testgen.artifact_store import ArtifactStore
 from ai_testgen.requirement_atomization import (
     CandidatePackageArtifactError,
+    DEFAULT_SKILL_DEFINITION_PATH,
     InvalidAtomicRequirementLedgerError,
     InvalidRequirementAtomizationSkillError,
-    RequirementAtomizationError,
     RequirementAtomizationSkillError,
-    atomize_candidate_package,
+    atomize_candidate_package_deterministic_for_tests,
     atomize_requirements_from_candidate_package_artifact,
 )
 from ai_testgen.schemas import (
@@ -123,12 +123,36 @@ def runtime_with_adapter(artifact_root: Path, output: dict) -> tuple[SkillRuntim
     return SkillRuntime(artifact_root=artifact_root, adapter=adapter), adapter
 
 
-def test_atomize_requirements_happy_path_writes_atomic_ledger(tmp_path):
+def write_skill_definition(path: Path, **overrides: object) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    definition = requirement_atomization_skill_definition(**overrides)
+    path.write_text(stable_json(definition.to_dict()), encoding="utf-8")
+    return path
+
+
+def test_production_atomization_uses_skill_runtime_when_no_skill_definition_is_supplied(tmp_path, monkeypatch):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
     candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+    runtime, adapter = runtime_with_adapter(
+        artifact_root,
+        atomic_ledger_data(
+            requirements=[
+                atomic_requirement(
+                    requirement_id="skill_generated_id",
+                    statement="The bot must ask for an order number before helping with order status.",
+                )
+            ]
+        ),
+    )
 
-    result = atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+    result = atomize_requirements_from_candidate_package_artifact(
+        candidate_artifact.path,
+        skill_runtime=runtime,
+    )
 
     expected_atomic_path = (
         artifact_root
@@ -140,8 +164,11 @@ def test_atomize_requirements_happy_path_writes_atomic_ledger(tmp_path):
     expected_ledger = atomic_ledger_data()
     assert result.atomic_ledger_path == expected_atomic_path
     assert result.atomic_ledger.to_dict() == expected_ledger
-    assert result.skill_run_record is None
-    assert result.skill_run_record_path is None
+    assert result.skill_run_record.skill_id == "fake_requirement_atomization_v1"
+    assert result.skill_run_record_path == (
+        artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json"
+    )
+    assert len(adapter.calls) == 1
     assert AtomicRequirementLedger.from_dict(
         json.loads(expected_atomic_path.read_text(encoding="utf-8"))
     ) == result.atomic_ledger
@@ -158,7 +185,7 @@ def test_candidate_split_into_multiple_atomic_requirements():
         )
     )
 
-    ledger = atomize_candidate_package(candidate_package)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
 
     assert [requirement.requirement_id for requirement in ledger.requirements] == ["req_001", "req_002"]
     assert [requirement.statement for requirement in ledger.requirements] == [
@@ -179,7 +206,7 @@ def test_ambiguous_and_phrase_is_not_split_into_invalid_requirements():
         )
     )
 
-    ledger = atomize_candidate_package(candidate_package)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
 
     assert [requirement.statement for requirement in ledger.requirements] == [
         "The bot must collect first and last name.",
@@ -197,7 +224,7 @@ def test_and_phrase_inside_object_is_not_split():
         )
     )
 
-    ledger = atomize_candidate_package(candidate_package)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
 
     assert [requirement.statement for requirement in ledger.requirements] == [
         "The bot must show order status and payment history.",
@@ -220,7 +247,7 @@ def test_and_split_does_not_create_prepositional_fragments(statement):
         )
     )
 
-    ledger = atomize_candidate_package(candidate_package)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
 
     assert [requirement.statement for requirement in ledger.requirements] == [statement]
 
@@ -234,7 +261,7 @@ def test_source_refs_candidate_ids_and_origin_are_preserved():
         candidate_package_data(candidates=[candidate_requirement(source_refs=refs)])
     )
 
-    ledger = atomize_candidate_package(candidate_package)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
     requirement = ledger.requirements[0]
 
     assert requirement.origin == "source_derived"
@@ -252,6 +279,48 @@ def test_candidate_missing_source_refs_is_rejected_by_schema_validation(tmp_path
     candidate_artifact = write_candidate_package(store, data=invalid_candidate_package)
 
     with pytest.raises(CandidatePackageArtifactError, match="source_refs"):
+        atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "04_atomic_requirements"
+        / "atomic_requirement_ledger.json"
+    ).exists()
+
+
+def test_missing_default_skill_definition_fails_without_heuristic_atomization(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    monkeypatch.setattr(
+        requirement_atomization,
+        "DEFAULT_SKILL_DEFINITION_PATH",
+        tmp_path / "skills" / "missing_requirement_atomization_v1.json",
+    )
+
+    with pytest.raises(InvalidRequirementAtomizationSkillError, match="SkillDefinition file not found"):
+        atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "04_atomic_requirements"
+        / "atomic_requirement_ledger.json"
+    ).exists()
+
+
+def test_invalid_default_atomization_skill_definition_fails_clearly(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path, input_contract="SourcePackage")
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+
+    with pytest.raises(InvalidRequirementAtomizationSkillError, match="input_contract"):
         atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
 
     assert not (
@@ -379,6 +448,48 @@ def test_skill_source_derived_requirement_must_preserve_candidate_source_refs(tm
         )
 
 
+def test_skill_output_with_unknown_candidate_id_fails(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    skill_output = atomic_ledger_data(
+        requirements=[
+            atomic_requirement(
+                candidate_ids=["cand_missing"],
+            )
+        ]
+    )
+    runtime, _adapter = runtime_with_adapter(artifact_root, skill_output)
+
+    with pytest.raises(InvalidAtomicRequirementLedgerError, match="unknown candidate"):
+        atomize_requirements_from_candidate_package_artifact(
+            candidate_artifact.path,
+            requirement_atomization_skill_definition(),
+            skill_runtime=runtime,
+        )
+
+
+def test_source_derived_skill_output_without_candidate_ids_fails(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    skill_output = atomic_ledger_data(
+        requirements=[
+            atomic_requirement(
+                candidate_ids=None,
+            )
+        ]
+    )
+    runtime, _adapter = runtime_with_adapter(artifact_root, skill_output)
+
+    with pytest.raises(InvalidAtomicRequirementLedgerError, match="candidate_ids"):
+        atomize_requirements_from_candidate_package_artifact(
+            candidate_artifact.path,
+            requirement_atomization_skill_definition(),
+            skill_runtime=runtime,
+        )
+
+
 def test_requirement_atomization_skill_must_declare_c08_contracts(tmp_path):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
@@ -423,17 +534,15 @@ def test_skill_atomization_writes_documented_outputs_and_raw_skill_output(tmp_pa
     ]
 
 
-def test_golden_fixture_candidate_package_to_atomic_ledger(tmp_path):
-    artifact_root = tmp_path / "artifacts"
-    store = ArtifactStore(artifact_root)
+def test_golden_fixture_candidate_package_to_atomic_ledger():
     source_data = json.loads((GOLDEN_DIR / "candidate_requirement_package.json").read_text(encoding="utf-8"))
     expected_ledger = json.loads((GOLDEN_DIR / "atomic_requirement_ledger.json").read_text(encoding="utf-8"))
-    candidate_artifact = write_candidate_package(store, data=source_data)
+    candidate_package = CandidateRequirementPackage.from_dict(source_data)
 
-    result = atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
 
-    assert result.atomic_ledger.to_dict() == expected_ledger
-    assert stable_json(result.atomic_ledger.to_dict()) == (
+    assert ledger.to_dict() == expected_ledger
+    assert stable_json(ledger.to_dict()) == (
         GOLDEN_DIR / "atomic_requirement_ledger.json"
     ).read_text(encoding="utf-8")
 
@@ -493,18 +602,62 @@ def test_cli_atomize_requirements_reports_invalid_candidate_artifact(tmp_path, c
     assert "CandidateRequirementPackage" in captured.err
 
 
-def test_c08_writes_no_future_component_artifacts(tmp_path):
+def test_c08_writes_no_future_component_artifacts(tmp_path, monkeypatch):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
     candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+    runtime, _adapter = runtime_with_adapter(artifact_root, atomic_ledger_data())
 
-    atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+    atomize_requirements_from_candidate_package_artifact(
+        candidate_artifact.path,
+        skill_runtime=runtime,
+    )
 
     files = sorted(path.relative_to(artifact_root).as_posix() for path in artifact_root.rglob("*") if path.is_file())
     assert files == [
         "demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json",
         "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger.json",
+        "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger_skill_output.json",
+        "demo_chatbot/run_001/skill_runs/skill_run_001.json",
     ]
+
+
+def test_deterministic_helper_is_explicitly_named_for_tests_only():
+    candidate_package = CandidateRequirementPackage.from_dict(candidate_package_data())
+
+    ledger = atomize_candidate_package_deterministic_for_tests(candidate_package)
+
+    assert ledger.to_dict() == atomic_ledger_data()
+    assert not hasattr(requirement_atomization, "atomize_candidate_package")
+
+
+def test_production_public_function_does_not_call_deterministic_helper(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+
+    def fail_if_called(candidate_package):
+        raise AssertionError("production path must not call deterministic helper")
+
+    monkeypatch.setattr(
+        requirement_atomization,
+        "atomize_candidate_package_deterministic_for_tests",
+        fail_if_called,
+    )
+    runtime, _adapter = runtime_with_adapter(artifact_root, atomic_ledger_data())
+
+    result = atomize_requirements_from_candidate_package_artifact(
+        candidate_artifact.path,
+        skill_runtime=runtime,
+    )
+
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
 
 
 def test_c08_implementation_has_no_future_component_or_provider_dependencies():
