@@ -191,6 +191,45 @@ def test_conflict_is_marked_and_preserved():
     assert governed.governance_summary["conflicting"] == 1
 
 
+def test_explicit_conflict_takes_precedence_over_duplicate_detection():
+    config = ProjectConfig.from_dict(project_config_data())
+    atomic_ledger = AtomicRequirementLedger.from_dict(
+        atomic_ledger_data(
+            requirements=[
+                atomic_requirement(requirement_id="req_001"),
+                atomic_requirement(
+                    requirement_id="req_002",
+                    source_refs=[source_ref(chunk_id="chunk_002")],
+                    candidate_ids=["cand_002"],
+                    conflicts_with=["req_001"],
+                ),
+            ]
+        )
+    )
+
+    governed = govern_atomic_requirement_ledger(atomic_ledger, config)
+
+    assert governed.requirements[1].status == "conflicting"
+    assert governed.requirements[1].duplicate_of is None
+    assert governed.requirements[1].conflicts_with == ["req_001"]
+    assert governed.governance_summary["conflicting"] == 1
+    assert governed.governance_summary["duplicate"] == 0
+
+
+def test_conflicting_requirement_must_identify_conflicts_with():
+    config = ProjectConfig.from_dict(project_config_data())
+    atomic_ledger = AtomicRequirementLedger.from_dict(
+        atomic_ledger_data(
+            requirements=[
+                atomic_requirement(status="conflicting"),
+            ]
+        )
+    )
+
+    with pytest.raises(InvalidGovernedRequirementLedgerError, match="conflicts_with"):
+        govern_atomic_requirement_ledger(atomic_ledger, config)
+
+
 def test_rejected_requirement_is_retained_but_ineligible_for_obligation_planning():
     config = ProjectConfig.from_dict(project_config_data())
     atomic_ledger = AtomicRequirementLedger.from_dict(
@@ -210,6 +249,39 @@ def test_rejected_requirement_is_retained_but_ineligible_for_obligation_planning
     assert governed.requirements[0].status == "rejected"
     assert governed.requirements[0].is_eligible_for_obligation_planning is False
     assert governed.governance_summary["rejected"] == 1
+
+
+def test_rejected_requirement_without_rationale_gets_deterministic_reason():
+    config = ProjectConfig.from_dict(project_config_data())
+    atomic_ledger = AtomicRequirementLedger.from_dict(
+        atomic_ledger_data(
+            requirements=[
+                atomic_requirement(status="rejected"),
+            ]
+        )
+    )
+
+    governed = govern_atomic_requirement_ledger(atomic_ledger, config)
+
+    assert governed.requirements[0].status == "rejected"
+    assert governed.requirements[0].rationale == "Rejected before governance without a recorded rationale."
+
+
+def test_out_of_scope_requirement_is_retained_but_ineligible_for_obligation_planning():
+    config = ProjectConfig.from_dict(project_config_data())
+    atomic_ledger = AtomicRequirementLedger.from_dict(
+        atomic_ledger_data(
+            requirements=[
+                atomic_requirement(status="out_of_scope"),
+            ]
+        )
+    )
+
+    governed = govern_atomic_requirement_ledger(atomic_ledger, config)
+
+    assert governed.requirements[0].status == "out_of_scope"
+    assert governed.requirements[0].is_eligible_for_obligation_planning is False
+    assert governed.governance_summary["out_of_scope"] == 1
 
 
 @pytest.mark.parametrize("origin", ["inferred", "assumption", "user_added", "system_default"])
@@ -278,6 +350,67 @@ def test_missing_project_config_artifact_is_reported(tmp_path):
     atomic_artifact = write_atomic_ledger(store)
 
     with pytest.raises(ProjectConfigArtifactError, match="ProjectConfig"):
+        govern_requirements_from_atomic_ledger_artifact(atomic_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "05_governed_requirements"
+        / "governed_requirement_ledger.json"
+    ).exists()
+
+
+def test_source_derived_requirement_without_source_refs_is_rejected_by_schema_validation(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store)
+    requirement = atomic_requirement()
+    requirement.pop("source_refs")
+    atomic_artifact = write_atomic_ledger(store, data=atomic_ledger_data(requirements=[requirement]))
+
+    with pytest.raises(AtomicLedgerArtifactError, match="source_refs"):
+        govern_requirements_from_atomic_ledger_artifact(atomic_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "05_governed_requirements"
+        / "governed_requirement_ledger.json"
+    ).exists()
+
+
+def test_source_derived_requirement_without_candidate_ids_is_rejected_by_schema_validation(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store)
+    requirement = atomic_requirement()
+    requirement.pop("candidate_ids")
+    atomic_artifact = write_atomic_ledger(store, data=atomic_ledger_data(requirements=[requirement]))
+
+    with pytest.raises(AtomicLedgerArtifactError, match="candidate_ids"):
+        govern_requirements_from_atomic_ledger_artifact(atomic_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "05_governed_requirements"
+        / "governed_requirement_ledger.json"
+    ).exists()
+
+
+def test_unknown_requirement_status_is_rejected_by_schema_validation(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store)
+    atomic_artifact = write_atomic_ledger(
+        store,
+        data=atomic_ledger_data(requirements=[atomic_requirement(status="ready_for_export")]),
+    )
+
+    with pytest.raises(AtomicLedgerArtifactError, match="status"):
         govern_requirements_from_atomic_ledger_artifact(atomic_artifact.path)
 
     assert not (

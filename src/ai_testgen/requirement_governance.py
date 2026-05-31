@@ -106,15 +106,19 @@ def govern_atomic_requirement_ledger(
 
     for requirement in atomic_ledger.requirements:
         data = requirement.to_dict()
-        duplicate_key = _duplicate_key(requirement)
-        duplicate_of = first_requirement_by_duplicate_key.get(duplicate_key)
-        if duplicate_of is not None and requirement.status != AtomicRequirementStatus.REJECTED:
-            data["status"] = AtomicRequirementStatus.DUPLICATE.value
-            data["duplicate_of"] = duplicate_of
-        else:
-            first_requirement_by_duplicate_key.setdefault(duplicate_key, requirement.requirement_id)
+        if requirement.conflicts_with or requirement.status == AtomicRequirementStatus.CONFLICTING:
             _apply_status_decision(data, requirement)
+        else:
+            duplicate_key = _duplicate_key(requirement)
+            duplicate_of = first_requirement_by_duplicate_key.get(duplicate_key)
+            if duplicate_of is not None and requirement.status != AtomicRequirementStatus.REJECTED:
+                data["status"] = AtomicRequirementStatus.DUPLICATE.value
+                data["duplicate_of"] = duplicate_of
+            else:
+                first_requirement_by_duplicate_key.setdefault(duplicate_key, requirement.requirement_id)
+                _apply_status_decision(data, requirement)
 
+        _ensure_rejection_rationale(data)
         governed_requirements.append(_governed_requirement_from_dict(data))
 
     summary = _governance_summary(governed_requirements)
@@ -166,6 +170,11 @@ def _governed_requirement_from_dict(data: dict) -> AtomicRequirement:
         raise InvalidGovernedRequirementLedgerError(f"Invalid governed AtomicRequirement data: {exc}") from exc
 
 
+def _ensure_rejection_rationale(data: dict) -> None:
+    if data.get("status") == AtomicRequirementStatus.REJECTED.value and not data.get("rationale"):
+        data["rationale"] = "Rejected before governance without a recorded rationale."
+
+
 def _validate_governed_ledger(governed_ledger: GovernedRequirementLedger) -> None:
     requirement_ids = {requirement.requirement_id for requirement in governed_ledger.requirements}
     for requirement in governed_ledger.requirements:
@@ -173,6 +182,10 @@ def _validate_governed_ledger(governed_ledger: GovernedRequirementLedger) -> Non
             raise InvalidGovernedRequirementLedgerError(
                 f"duplicate requirement {requirement.requirement_id} references unknown requirement "
                 f"{requirement.duplicate_of}"
+            )
+        if requirement.status == AtomicRequirementStatus.CONFLICTING and not requirement.conflicts_with:
+            raise InvalidGovernedRequirementLedgerError(
+                f"conflicting requirement {requirement.requirement_id} must identify conflicts_with"
             )
         if requirement.conflicts_with is not None:
             for conflict_id in requirement.conflicts_with:
