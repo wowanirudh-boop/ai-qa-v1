@@ -10,6 +10,7 @@ from typing import Any
 from ai_testgen.artifact_store import ArtifactStore, ArtifactStoreError
 from ai_testgen.schemas import (
     CandidateRequirementPackage,
+    SourceChunk,
     SchemaValidationError,
     SkillDefinition,
     SkillRunRecord,
@@ -69,6 +70,8 @@ class RequirementExtractionResult:
     skill_run_record: SkillRunRecord
     candidate_package_path: Path
     skill_run_record_path: Path
+    skill_run_records: list[SkillRunRecord]
+    skill_run_record_paths: list[Path]
     source_status_path: Path | None = None
 
 
@@ -78,7 +81,11 @@ def extract_requirements_from_source_package_artifact(
     *,
     skill_runtime: SkillRuntime | None = None,
     skill_run_id: str | None = None,
+    max_chunks_per_skill_run: int = 1,
 ) -> RequirementExtractionResult:
+    if type(max_chunks_per_skill_run) is not int or max_chunks_per_skill_run < 1:
+        raise SourcePackageArtifactError("max_chunks_per_skill_run must be a positive integer")
+
     source_path = Path(source_package_path)
     artifact_root, project_id, run_id = _artifact_context_from_source_package_path(source_path)
     store = ArtifactStore(artifact_root)
@@ -90,41 +97,58 @@ def extract_requirements_from_source_package_artifact(
         )
 
     definition = _load_requirement_extraction_skill_definition(skill_definition)
-    eligible_source_package = _source_package_with_eligible_chunks(source_package)
-    eligible_source_artifact = _write_extraction_input_source_package(
-        store,
-        run_id=run_id,
-        source_package=eligible_source_package,
-    )
-    raw_candidate_path, raw_candidate_version = _next_artifact_path(
-        store,
-        project_id,
-        run_id,
-        CANDIDATE_REQUIREMENTS_STAGE,
-        RAW_CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME,
-    )
-    run_id_for_skill = skill_run_id or _next_skill_run_id(store, project_id, run_id)
+    eligible_chunks = _eligible_source_chunks(source_package)
     runtime = skill_runtime or SkillRuntime(artifact_root=artifact_root)
+    batches = list(_chunk_batches(eligible_chunks, max_chunks_per_skill_run))
+    raw_candidate_packages: list[CandidateRequirementPackage] = []
+    skill_run_records: list[SkillRunRecord] = []
 
-    try:
-        skill_run_record = runtime.run_skill(
-            definition,
-            input_artifact_paths=[eligible_source_artifact.path],
-            output_artifact_paths=[raw_candidate_path],
-            skill_run_id=run_id_for_skill,
+    for batch_index, batch in enumerate(batches, start=1):
+        bounded_source_package = _source_package_with_chunks(source_package, batch)
+        bounded_source_artifact = _write_extraction_input_source_package(
+            store,
+            run_id=run_id,
+            source_package=bounded_source_package,
         )
-    except SkillExecutionError as exc:
-        raise RequirementExtractionSkillError(f"Requirement extraction skill failed: {exc}") from exc
+        raw_candidate_path, raw_candidate_version = _next_artifact_path(
+            store,
+            project_id,
+            run_id,
+            CANDIDATE_REQUIREMENTS_STAGE,
+            RAW_CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME,
+        )
+        run_id_for_skill = _skill_run_id_for_batch(
+            store,
+            project_id,
+            run_id,
+            skill_run_id,
+            batch_index,
+            len(batches),
+        )
 
-    raw_candidate_package = _load_candidate_package(
-        store,
-        project_id=project_id,
-        run_id=run_id,
-        artifact_name=RAW_CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME,
-        version=raw_candidate_version,
-    )
-    validate_candidate_package_against_source(raw_candidate_package, eligible_source_package)
-    candidate_package = _candidate_package_with_deterministic_ids(raw_candidate_package)
+        try:
+            skill_run_record = runtime.run_skill(
+                definition,
+                input_artifact_paths=[bounded_source_artifact.path],
+                output_artifact_paths=[raw_candidate_path],
+                skill_run_id=run_id_for_skill,
+            )
+        except SkillExecutionError as exc:
+            raise RequirementExtractionSkillError(f"Requirement extraction skill failed: {exc}") from exc
+
+        raw_candidate_package = _load_candidate_package(
+            store,
+            project_id=project_id,
+            run_id=run_id,
+            artifact_name=RAW_CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME,
+            version=raw_candidate_version,
+        )
+        validate_candidate_package_against_source(raw_candidate_package, bounded_source_package)
+        raw_candidate_packages.append(raw_candidate_package)
+        skill_run_records.append(skill_run_record)
+
+    candidate_package = _merge_candidate_packages_with_deterministic_ids(raw_candidate_packages)
+    validate_candidate_package_against_source(candidate_package, source_package)
     final_candidate_artifact = _write_candidate_package(
         store,
         run_id=run_id,
@@ -136,13 +160,20 @@ def extract_requirements_from_source_package_artifact(
         run_id=run_id,
         source_package=source_package,
         candidate_package=candidate_package,
+        eligible_chunk_ids={chunk.chunk_id for chunk in eligible_chunks},
     )
+    skill_run_record_paths = [
+        store.artifact_path(project_id, run_id, "skill_runs", record.skill_run_id)
+        for record in skill_run_records
+    ]
 
     return RequirementExtractionResult(
         candidate_package=candidate_package,
-        skill_run_record=skill_run_record,
+        skill_run_record=skill_run_records[0],
         candidate_package_path=final_candidate_artifact.path,
-        skill_run_record_path=store.artifact_path(project_id, run_id, "skill_runs", skill_run_record.skill_run_id),
+        skill_run_record_path=skill_run_record_paths[0],
+        skill_run_records=skill_run_records,
+        skill_run_record_paths=skill_run_record_paths,
         source_status_path=status_path,
     )
 
@@ -159,6 +190,7 @@ def validate_candidate_package_against_source(
         )
 
     chunks_by_id = {chunk.chunk_id: chunk for chunk in source_package.chunks}
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in candidate_package.candidates}
     for candidate in candidate_package.candidates:
         for source_ref in candidate.source_refs:
             chunk = chunks_by_id.get(source_ref.chunk_id or "")
@@ -170,6 +202,22 @@ def validate_candidate_package_against_source(
                 raise InvalidCandidateRequirementPackageError(
                     f"candidate {candidate.candidate_id} source_ref document_id must match chunk "
                     f"{source_ref.chunk_id}"
+                )
+    for chunk_result in candidate_package.chunk_extraction_results or []:
+        if chunk_result.chunk_id not in chunks_by_id:
+            raise InvalidCandidateRequirementPackageError(
+                f"chunk extraction result references unknown source chunk {chunk_result.chunk_id}"
+            )
+        for candidate_id in chunk_result.candidate_ids:
+            candidate = candidates_by_id.get(candidate_id)
+            if candidate is None:
+                raise InvalidCandidateRequirementPackageError(
+                    f"chunk extraction result references unknown candidate {candidate_id}"
+                )
+            if not any(source_ref.chunk_id == chunk_result.chunk_id for source_ref in candidate.source_refs):
+                raise InvalidCandidateRequirementPackageError(
+                    f"chunk extraction result candidate {candidate_id} must reference chunk "
+                    f"{chunk_result.chunk_id}"
                 )
 
 
@@ -284,8 +332,13 @@ def _write_updated_source_package_if_needed(
     run_id: str,
     source_package: SourcePackage,
     candidate_package: CandidateRequirementPackage,
+    eligible_chunk_ids: set[str],
 ) -> Path | None:
-    updated_source_package = _source_package_with_extraction_statuses(source_package, candidate_package)
+    updated_source_package = _source_package_with_extraction_statuses(
+        source_package,
+        candidate_package,
+        eligible_chunk_ids=eligible_chunk_ids,
+    )
     if updated_source_package is None:
         return None
 
@@ -304,13 +357,21 @@ def _write_updated_source_package_if_needed(
     return written.path
 
 
-def _source_package_with_eligible_chunks(source_package: SourcePackage) -> SourcePackage:
-    data = source_package.to_dict()
-    data["chunks"] = [
+def _eligible_source_chunks(source_package: SourcePackage) -> list[SourceChunk]:
+    chunks = [
         chunk
-        for chunk in data["chunks"]
-        if chunk["processing_status"] == SourceChunkProcessingStatus.NOT_PROCESSED.value
+        for chunk in source_package.chunks
+        if chunk.processing_status == SourceChunkProcessingStatus.NOT_PROCESSED
     ]
+    if not chunks:
+        raise SourcePackageArtifactError("No source chunks are eligible for requirement extraction")
+    return chunks
+
+
+def _source_package_with_chunks(source_package: SourcePackage, chunks: list[SourceChunk]) -> SourcePackage:
+    data = source_package.to_dict()
+    chunk_ids = {chunk.chunk_id for chunk in chunks}
+    data["chunks"] = [chunk for chunk in data["chunks"] if chunk["chunk_id"] in chunk_ids]
     if not data["chunks"]:
         raise SourcePackageArtifactError("No source chunks are eligible for requirement extraction")
     data["checksum"] = _checksum_source_package_data(data)
@@ -320,13 +381,56 @@ def _source_package_with_eligible_chunks(source_package: SourcePackage) -> Sourc
         raise SourcePackageArtifactError(f"Invalid eligible SourcePackage data: {exc}") from exc
 
 
-def _candidate_package_with_deterministic_ids(
-    candidate_package: CandidateRequirementPackage,
+def _merge_candidate_packages_with_deterministic_ids(
+    candidate_packages: list[CandidateRequirementPackage],
 ) -> CandidateRequirementPackage:
-    data = candidate_package.to_dict()
-    data["candidate_package_id"] = CANDIDATE_PACKAGE_ID
-    for index, candidate in enumerate(data["candidates"], start=1):
-        candidate["candidate_id"] = f"cand_{index:03d}"
+    if not candidate_packages:
+        raise InvalidCandidateRequirementPackageError("No CandidateRequirementPackage outputs to merge")
+
+    project_id = candidate_packages[0].project_id
+    source_package_id = candidate_packages[0].source_package_id
+    data: dict[str, Any] = {
+        "candidate_package_id": CANDIDATE_PACKAGE_ID,
+        "project_id": project_id,
+        "source_package_id": source_package_id,
+        "candidates": [],
+    }
+    chunk_extraction_results: list[dict[str, Any]] = []
+    next_candidate_id = count(1)
+
+    for package in candidate_packages:
+        if package.project_id != project_id:
+            raise InvalidCandidateRequirementPackageError("CandidateRequirementPackage project_id values must match")
+        if package.source_package_id != source_package_id:
+            raise InvalidCandidateRequirementPackageError(
+                "CandidateRequirementPackage source_package_id values must match"
+            )
+
+        candidate_id_map: dict[str, str] = {}
+        for candidate in package.candidates:
+            candidate_data = candidate.to_dict()
+            original_candidate_id = candidate_data["candidate_id"]
+            rewritten_candidate_id = f"cand_{next(next_candidate_id):03d}"
+            candidate_data["candidate_id"] = rewritten_candidate_id
+            candidate_id_map[original_candidate_id] = rewritten_candidate_id
+            data["candidates"].append(candidate_data)
+
+        for chunk_result in package.chunk_extraction_results or []:
+            chunk_result_data = chunk_result.to_dict()
+            rewritten_candidate_ids = []
+            for candidate_id in chunk_result.candidate_ids:
+                rewritten_candidate_id = candidate_id_map.get(candidate_id)
+                if rewritten_candidate_id is None:
+                    raise InvalidCandidateRequirementPackageError(
+                        f"chunk extraction result references unknown candidate {candidate_id}"
+                    )
+                rewritten_candidate_ids.append(rewritten_candidate_id)
+            chunk_result_data["candidate_ids"] = rewritten_candidate_ids
+            chunk_extraction_results.append(chunk_result_data)
+
+    if chunk_extraction_results:
+        data["chunk_extraction_results"] = chunk_extraction_results
+
     try:
         return CandidateRequirementPackage.from_dict(data)
     except SchemaValidationError as exc:
@@ -338,6 +442,8 @@ def _candidate_package_with_deterministic_ids(
 def _source_package_with_extraction_statuses(
     source_package: SourcePackage,
     candidate_package: CandidateRequirementPackage,
+    *,
+    eligible_chunk_ids: set[str],
 ) -> SourcePackage | None:
     referenced_chunk_ids = {
         source_ref.chunk_id
@@ -345,18 +451,28 @@ def _source_package_with_extraction_statuses(
         for source_ref in candidate.source_refs
         if source_ref.chunk_id
     }
-    if not referenced_chunk_ids:
-        return None
+    result_status_by_chunk_id = {
+        chunk_result.chunk_id: chunk_result.processing_status
+        for chunk_result in candidate_package.chunk_extraction_results or []
+    }
 
     data = source_package.to_dict()
     changed = False
     for chunk in data["chunks"]:
         if (
-            chunk["chunk_id"] in referenced_chunk_ids
+            chunk["chunk_id"] in eligible_chunk_ids
             and chunk["processing_status"] == SourceChunkProcessingStatus.NOT_PROCESSED.value
         ):
-            chunk["processing_status"] = SourceChunkProcessingStatus.REQUIREMENTS_EXTRACTED.value
-            changed = True
+            if chunk["chunk_id"] in referenced_chunk_ids:
+                next_status = SourceChunkProcessingStatus.REQUIREMENTS_EXTRACTED.value
+            elif chunk["chunk_id"] in result_status_by_chunk_id:
+                next_status = result_status_by_chunk_id[chunk["chunk_id"]].value
+            else:
+                next_status = SourceChunkProcessingStatus.FAILED_PROCESSING.value
+
+            if chunk["processing_status"] != next_status:
+                chunk["processing_status"] = next_status
+                changed = True
 
     if not changed:
         return None
@@ -397,6 +513,28 @@ def _next_skill_run_id(store: ArtifactStore, project_id: str, run_id: str) -> st
         if not store.exists(project_id, run_id, "skill_runs", skill_run_id):
             return skill_run_id
     raise AssertionError("unreachable")
+
+
+def _skill_run_id_for_batch(
+    store: ArtifactStore,
+    project_id: str,
+    run_id: str,
+    requested_skill_run_id: str | None,
+    batch_index: int,
+    batch_count: int,
+) -> str:
+    if requested_skill_run_id is None:
+        return _next_skill_run_id(store, project_id, run_id)
+    if batch_count == 1:
+        return requested_skill_run_id
+    return f"{requested_skill_run_id}_{batch_index:03d}"
+
+
+def _chunk_batches(chunks: list[SourceChunk], batch_size: int) -> list[list[SourceChunk]]:
+    return [
+        chunks[index:index + batch_size]
+        for index in range(0, len(chunks), batch_size)
+    ]
 
 
 def _checksum_source_package_data(data: dict[str, Any]) -> str:

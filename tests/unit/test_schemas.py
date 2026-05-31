@@ -10,6 +10,7 @@ from ai_testgen.schemas import (
     AtomicRequirementLedger,
     CandidateRequirement,
     CandidateRequirementPackage,
+    ChunkExtractionResult,
     ConversationTurn,
     CoverageReport,
     Document,
@@ -164,12 +165,28 @@ CONTRACT_CASES = [
     ),
     (CandidateRequirement, candidate_requirement()),
     (
+        ChunkExtractionResult,
+        {
+            "chunk_id": "chunk_001",
+            "processing_status": "requirements_extracted",
+            "candidate_ids": ["cand_001"],
+            "rationale": "The chunk contains a testable bot behavior.",
+        },
+    ),
+    (
         CandidateRequirementPackage,
         {
             "candidate_package_id": "cand_pkg_001",
             "project_id": "demo_chatbot",
             "source_package_id": "source_pkg_001",
             "candidates": [candidate_requirement()],
+            "chunk_extraction_results": [
+                {
+                    "chunk_id": "chunk_001",
+                    "processing_status": "requirements_extracted",
+                    "candidate_ids": ["cand_001"],
+                }
+            ],
         },
     ),
     (AtomicRequirement, atomic_requirement()),
@@ -361,6 +378,17 @@ def test_candidate_requirement_confidence_bounds_and_source_refs():
     data["source_refs"] = []
     with pytest.raises(SchemaValidationError, match="source_refs"):
         CandidateRequirement.from_dict(data)
+
+
+def test_chunk_extraction_result_rejects_not_processed_status():
+    with pytest.raises(SchemaValidationError, match="processing_status"):
+        ChunkExtractionResult.from_dict(
+            {
+                "chunk_id": "chunk_001",
+                "processing_status": "not_processed",
+                "candidate_ids": [],
+            }
+        )
 
 
 def test_atomic_requirement_origin_status_and_source_ref_rules():
@@ -630,7 +658,7 @@ def test_executor_export_package_validation_rejects_ineligible_tests():
             "validation_summary": {"draft": 1},
         }
     )
-    package = ExecutorExportPackage.from_dict(CONTRACT_CASES[19][1])
+    package = ExecutorExportPackage.from_dict(CONTRACT_CASES[20][1])
 
     with pytest.raises(SchemaValidationError, match="not exportable"):
         validate_executor_export_package(package, suite)

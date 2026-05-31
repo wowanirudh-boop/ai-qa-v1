@@ -105,6 +105,15 @@ NORMAL_OBLIGATION_STATUSES = {
     TestObligationStatus.COVERED,
 }
 
+CHUNK_EXTRACTION_RESULT_STATUSES = {
+    SourceChunkProcessingStatus.REQUIREMENTS_EXTRACTED,
+    SourceChunkProcessingStatus.NON_TESTABLE_CONTEXT,
+    SourceChunkProcessingStatus.DUPLICATE,
+    SourceChunkProcessingStatus.OUT_OF_SCOPE,
+    SourceChunkProcessingStatus.UNCLEAR,
+    SourceChunkProcessingStatus.FAILED_PROCESSING,
+}
+
 PIPELINE_RUN_STAGES = [
     "C03_project_config",
     "C04_document_ingestion",
@@ -515,11 +524,35 @@ class CandidateRequirement(SchemaModel):
 
 
 @dataclass
+class ChunkExtractionResult(SchemaModel):
+    chunk_id: str
+    processing_status: SourceChunkProcessingStatus
+    candidate_ids: list[str]
+    rationale: str | None = None
+    error_message: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    def _validate(self) -> None:
+        self.processing_status = _coerce_enum(
+            SourceChunkProcessingStatus, self.processing_status, "processing_status"
+        )
+        _require_non_empty_str(self.chunk_id, "chunk_id")
+        if self.processing_status not in CHUNK_EXTRACTION_RESULT_STATUSES:
+            raise SchemaValidationError("processing_status must be a final extraction status")
+        _validate_id_list(self.candidate_ids, "candidate_ids")
+        _validate_optional_str(self.rationale, "rationale")
+        _validate_optional_str(self.error_message, "error_message")
+        if self.metadata is not None:
+            _validate_json_compatible(self.metadata, "metadata")
+
+
+@dataclass
 class CandidateRequirementPackage(SchemaModel):
     candidate_package_id: str
     project_id: str
     source_package_id: str
     candidates: list[CandidateRequirement]
+    chunk_extraction_results: list[ChunkExtractionResult] | None = None
     skill_run_ids: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -529,6 +562,9 @@ class CandidateRequirementPackage(SchemaModel):
         _require_non_empty_str(self.source_package_id, "source_package_id")
         _validate_model_list(self.candidates, CandidateRequirement, "candidates")
         _reject_duplicate_ids(self.candidates, "candidate_id", "candidates")
+        if self.chunk_extraction_results is not None:
+            _validate_model_list(self.chunk_extraction_results, ChunkExtractionResult, "chunk_extraction_results")
+            _reject_duplicate_ids(self.chunk_extraction_results, "chunk_id", "chunk_extraction_results")
         if self.skill_run_ids is not None:
             _validate_id_list(self.skill_run_ids, "skill_run_ids")
         if self.metadata is not None:

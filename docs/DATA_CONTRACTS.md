@@ -263,6 +263,7 @@ Required fields:
 
 Optional fields:
 
+- `chunk_extraction_results`
 - `skill_run_ids`
 - `metadata`
 
@@ -271,6 +272,11 @@ Validation rules:
 - Every candidate must have at least one entry in `source_refs`.
 - `source_package_id` must point to the source package used for extraction.
 - Candidate IDs must be unique within the package.
+- `chunk_extraction_results`, when present, records chunk-level C07 extraction outcomes.
+- Every chunk extraction result must include `chunk_id`, `processing_status`, and `candidate_ids`.
+- Chunk extraction result `processing_status` must be one of `requirements_extracted`, `non_testable_context`, `duplicate`, `out_of_scope`, `unclear`, or `failed_processing`.
+- Chunk extraction result `candidate_ids` may be empty for statuses that produce no candidates.
+- Chunk extraction results may include optional `rationale` and `error_message`.
 
 JSON example:
 
@@ -291,6 +297,19 @@ JSON example:
         }
       ],
       "confidence": 0.91
+    }
+  ],
+  "chunk_extraction_results": [
+    {
+      "chunk_id": "chunk_001",
+      "processing_status": "requirements_extracted",
+      "candidate_ids": ["cand_001"]
+    },
+    {
+      "chunk_id": "chunk_002",
+      "processing_status": "non_testable_context",
+      "candidate_ids": [],
+      "rationale": "Background information with no testable bot behavior."
     }
   ],
   "skill_run_ids": ["skill_run_001"]

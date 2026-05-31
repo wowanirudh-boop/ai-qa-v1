@@ -37,6 +37,7 @@ Output artifact path conventions:
 - `SourceChunk`
 - `SourceRef`
 - `CandidateRequirement`
+- `ChunkExtractionResult`
 - `CandidateRequirementPackage`
 - `SkillRunRecord`
 
@@ -95,7 +96,7 @@ unclear
 failed_processing
 ```
 
-If the current data contracts cannot represent per-chunk extraction results, `docs/DATA_CONTRACTS.md` and C01 schemas must be updated before C07 implementation.
+C07 uses `CandidateRequirementPackage.chunk_extraction_results` when the skill reports chunk-level outcomes.
 
 ## Validation rules
 

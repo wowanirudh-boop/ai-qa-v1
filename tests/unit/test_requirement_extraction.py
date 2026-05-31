@@ -48,7 +48,7 @@ def source_package_data(**overrides: object) -> dict:
         "document_ids": ["doc_001"],
         "chunks": [
             source_chunk(),
-            source_chunk(chunk_id="chunk_002", text="Company background context."),
+            source_chunk(chunk_id="chunk_002", text="Company background context.", status="out_of_scope"),
         ],
         "checksum": "sha256:pkg001",
     }
@@ -91,6 +91,26 @@ def candidate_package_data(**overrides: object) -> dict:
     return data
 
 
+def chunk_extraction_result(
+    chunk_id: str,
+    processing_status: str,
+    *,
+    candidate_ids: list[str] | None = None,
+    rationale: str | None = None,
+    error_message: str | None = None,
+) -> dict:
+    data = {
+        "chunk_id": chunk_id,
+        "processing_status": processing_status,
+        "candidate_ids": candidate_ids or [],
+    }
+    if rationale is not None:
+        data["rationale"] = rationale
+    if error_message is not None:
+        data["error_message"] = error_message
+    return data
+
+
 def requirement_extraction_skill_definition(**overrides: object) -> SkillDefinition:
     data = {
         "skill_id": "fake_requirement_extraction_v1",
@@ -109,12 +129,16 @@ def stable_json(data: dict) -> str:
 
 
 class FakeRequirementExtractionAdapter:
-    def __init__(self, output: dict) -> None:
+    def __init__(self, output) -> None:
         self.output = output
         self.calls = []
 
     def execute(self, skill_definition, input_artifacts):
         self.calls.append((skill_definition, input_artifacts))
+        if callable(self.output):
+            return self.output(skill_definition, input_artifacts, len(self.calls))
+        if isinstance(self.output, list):
+            return self.output[len(self.calls) - 1]
         return self.output
 
 
@@ -128,7 +152,7 @@ def write_source_package(store: ArtifactStore, *, data: dict | None = None):
     )
 
 
-def runtime_with_adapter(artifact_root: Path, output: dict) -> tuple[SkillRuntime, FakeRequirementExtractionAdapter]:
+def runtime_with_adapter(artifact_root: Path, output) -> tuple[SkillRuntime, FakeRequirementExtractionAdapter]:
     adapter = FakeRequirementExtractionAdapter(output)
     return SkillRuntime(artifact_root=artifact_root, adapter=adapter), adapter
 
@@ -161,6 +185,7 @@ def test_extract_requirements_happy_path_invokes_skill_runtime_and_writes_artifa
     assert result.skill_run_record.skill_run_id == "skill_run_001"
     assert len(adapter.calls) == 1
     assert isinstance(adapter.calls[0][1][0], SourcePackage)
+    assert [chunk.chunk_id for chunk in adapter.calls[0][1][0].chunks] == ["chunk_001"]
 
     status_path = (
         artifact_root
@@ -173,7 +198,7 @@ def test_extract_requirements_happy_path_invokes_skill_runtime_and_writes_artifa
     updated_source = SourcePackage.from_dict(json.loads(status_path.read_text(encoding="utf-8")))
     assert [chunk.processing_status for chunk in updated_source.chunks] == [
         "requirements_extracted",
-        "not_processed",
+        "out_of_scope",
     ]
 
     original_source = SourcePackage.from_dict(json.loads(source_artifact.path.read_text(encoding="utf-8")))
@@ -182,7 +207,7 @@ def test_extract_requirements_happy_path_invokes_skill_runtime_and_writes_artifa
         assert updated_chunk.document_id == original_chunk.document_id
         assert updated_chunk.text == original_chunk.text
         assert updated_chunk.checksum == original_chunk.checksum
-    assert [chunk.processing_status for chunk in original_source.chunks] == ["not_processed", "not_processed"]
+    assert [chunk.processing_status for chunk in original_source.chunks] == ["not_processed", "out_of_scope"]
 
     run_record_path = artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json"
     assert SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8"))) == (
@@ -245,6 +270,30 @@ def test_unknown_chunk_reference_fails_cross_artifact_validation(tmp_path):
     ).exists()
 
 
+def test_wrong_document_id_for_source_ref_fails_cross_artifact_validation(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(store)
+    invalid_output = candidate_package_data(
+        candidates=[candidate_requirement(source_refs=[source_ref(document_id="doc_missing")])]
+    )
+    runtime, _adapter = runtime_with_adapter(artifact_root, invalid_output)
+
+    with pytest.raises(InvalidCandidateRequirementPackageError, match="document_id"):
+        extract_requirements_from_source_package_artifact(
+            source_artifact.path,
+            requirement_extraction_skill_definition(),
+            skill_runtime=runtime,
+        )
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    ).exists()
+
+
 def test_candidate_confidence_outside_range_is_rejected_by_schema_validation(tmp_path):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
@@ -271,7 +320,15 @@ def test_candidate_confidence_outside_range_is_rejected_by_schema_validation(tmp
 def test_c07_assigns_deterministic_candidate_package_and_candidate_ids(tmp_path):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
-    source_artifact = write_source_package(store)
+    source_artifact = write_source_package(
+        store,
+        data=source_package_data(
+            chunks=[
+                source_chunk(),
+                source_chunk(chunk_id="chunk_002", text="Company background context."),
+            ]
+        ),
+    )
     skill_output = candidate_package_data(
         candidate_package_id="skill_owned_package_id",
         candidates=[
@@ -285,6 +342,7 @@ def test_c07_assigns_deterministic_candidate_package_and_candidate_ids(tmp_path)
         source_artifact.path,
         requirement_extraction_skill_definition(),
         skill_runtime=runtime,
+        max_chunks_per_skill_run=2,
     )
 
     assert result.candidate_package.candidate_package_id == "cand_pkg_001"
@@ -295,6 +353,96 @@ def test_c07_assigns_deterministic_candidate_package_and_candidate_ids(tmp_path)
     assert CandidateRequirementPackage.from_dict(
         json.loads(result.candidate_package_path.read_text(encoding="utf-8"))
     ) == result.candidate_package
+
+
+def test_multiple_eligible_chunks_produce_multiple_bounded_skill_runs_with_default_batch_size(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(
+        store,
+        data=source_package_data(
+            chunks=[
+                source_chunk(),
+                source_chunk(chunk_id="chunk_002", text="The bot must explain company background context."),
+            ]
+        ),
+    )
+
+    def output_for_chunk(_definition, input_artifacts, call_number):
+        chunk = input_artifacts[0].chunks[0]
+        return candidate_package_data(
+            candidate_package_id=f"skill_pkg_{call_number}",
+            candidates=[
+                candidate_requirement(
+                    candidate_id=f"skill_candidate_{call_number}",
+                    statement=f"Requirement from {chunk.chunk_id}.",
+                    source_refs=[source_ref(chunk_id=chunk.chunk_id, document_id=chunk.document_id)],
+                )
+            ],
+        )
+
+    runtime, adapter = runtime_with_adapter(artifact_root, output_for_chunk)
+
+    result = extract_requirements_from_source_package_artifact(
+        source_artifact.path,
+        requirement_extraction_skill_definition(),
+        skill_runtime=runtime,
+    )
+
+    assert len(adapter.calls) == 2
+    assert [[chunk.chunk_id for chunk in call[1][0].chunks] for call in adapter.calls] == [
+        ["chunk_001"],
+        ["chunk_002"],
+    ]
+    assert [candidate.candidate_id for candidate in result.candidate_package.candidates] == [
+        "cand_001",
+        "cand_002",
+    ]
+    assert [record.skill_run_id for record in result.skill_run_records] == [
+        "skill_run_001",
+        "skill_run_002",
+    ]
+
+
+def test_batched_chunks_respect_max_chunks_per_skill_run(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(
+        store,
+        data=source_package_data(
+            chunks=[
+                source_chunk(),
+                source_chunk(chunk_id="chunk_002", text="The bot must provide refund status."),
+                source_chunk(chunk_id="chunk_003", text="The bot must collect an email address."),
+            ]
+        ),
+    )
+
+    def output_for_batch(_definition, input_artifacts, call_number):
+        candidates = []
+        for index, chunk in enumerate(input_artifacts[0].chunks, start=1):
+            candidates.append(
+                candidate_requirement(
+                    candidate_id=f"skill_candidate_{call_number}_{index}",
+                    statement=f"Requirement from {chunk.chunk_id}.",
+                    source_refs=[source_ref(chunk_id=chunk.chunk_id, document_id=chunk.document_id)],
+                )
+            )
+        return candidate_package_data(candidate_package_id=f"skill_pkg_{call_number}", candidates=candidates)
+
+    runtime, adapter = runtime_with_adapter(artifact_root, output_for_batch)
+
+    extract_requirements_from_source_package_artifact(
+        source_artifact.path,
+        requirement_extraction_skill_definition(),
+        skill_runtime=runtime,
+        max_chunks_per_skill_run=2,
+    )
+
+    assert [[chunk.chunk_id for chunk in call[1][0].chunks] for call in adapter.calls] == [
+        ["chunk_001", "chunk_002"],
+        ["chunk_003"],
+    ]
 
 
 def test_only_not_processed_chunks_are_sent_to_requirement_extraction_skill(tmp_path):
@@ -406,7 +554,37 @@ def test_updated_source_package_status_artifact_uses_artifact_store_versioning(t
     assert result.source_status_path.name == "source_package_extraction_status.v2.json"
     assert source_artifact.path.name == "source_package.json"
     original_source = SourcePackage.from_dict(json.loads(source_artifact.path.read_text(encoding="utf-8")))
-    assert [chunk.processing_status for chunk in original_source.chunks] == ["not_processed", "not_processed"]
+    assert [chunk.processing_status for chunk in original_source.chunks] == ["not_processed", "out_of_scope"]
+
+
+@pytest.mark.parametrize(
+    "processing_status",
+    ["non_testable_context", "out_of_scope", "unclear", "failed_processing"],
+)
+def test_chunk_level_extraction_statuses_are_written_from_skill_output(tmp_path, processing_status):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(store)
+    skill_output = candidate_package_data(
+        candidates=[],
+        chunk_extraction_results=[
+            chunk_extraction_result("chunk_001", processing_status, rationale="No candidate emitted.")
+        ],
+    )
+    runtime, _adapter = runtime_with_adapter(artifact_root, skill_output)
+
+    result = extract_requirements_from_source_package_artifact(
+        source_artifact.path,
+        requirement_extraction_skill_definition(),
+        skill_runtime=runtime,
+    )
+
+    updated_source = SourcePackage.from_dict(json.loads(result.source_status_path.read_text(encoding="utf-8")))
+    assert [chunk.processing_status for chunk in updated_source.chunks] == [
+        processing_status,
+        "out_of_scope",
+    ]
+    assert result.candidate_package.chunk_extraction_results[0].processing_status == processing_status
 
 
 def test_golden_fixture_source_package_to_candidate_package(tmp_path):
@@ -423,6 +601,7 @@ def test_golden_fixture_source_package_to_candidate_package(tmp_path):
         source_artifact.path,
         requirement_extraction_skill_definition(),
         skill_runtime=runtime,
+        max_chunks_per_skill_run=2,
     )
 
     assert stable_json(result.candidate_package.to_dict()) == (
