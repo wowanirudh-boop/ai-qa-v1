@@ -7,6 +7,38 @@ from ai_testgen.skill_runtime import load_skill_definition
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_requirement_extraction_skill_definition_loads_with_c07_contracts():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "requirement_extraction_v1.json")
+
+    assert definition.skill_id == "requirement_extraction_v1"
+    assert definition.input_contract == "SourcePackage"
+    assert definition.output_contract == "CandidateRequirementPackage"
+
+
+def test_requirement_extraction_skill_definition_includes_required_rules():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "requirement_extraction_v1.json")
+    definition_text = json.dumps(definition.to_dict(), sort_keys=True)
+
+    required_phrases = [
+        "extract candidate chatbot testing requirements from bounded source chunks",
+        "Return JSON only",
+        "Use only the provided bounded SourcePackage",
+        "Do not infer unsupported bot behavior",
+        "Do not create atomic requirements",
+        "Do not generate test cases",
+        "Every candidate requirement must include non-empty source_refs",
+        "Every source_ref must point to a chunk in the input SourcePackage",
+        "Candidate confidence must be between 0 and 1",
+        "Mark or report chunks that contain no testable requirements",
+        "ambiguous chunks as unclear",
+        "out-of-scope chunks as out_of_scope",
+        "Preserve exact document_id and chunk_id values from input",
+    ]
+
+    for phrase in required_phrases:
+        assert phrase in definition_text
+
+
 def test_requirement_atomization_skill_definition_loads_with_c08_contracts():
     definition = load_skill_definition(REPO_ROOT / "skills" / "requirement_atomization_v1.json")
 

@@ -73,6 +73,7 @@ def atomic_requirement(**overrides: object) -> dict:
         "status": "validated",
         "origin": "source_derived",
         "source_refs": [source_ref()],
+        "candidate_ids": ["cand_001"],
     }
     data.update(overrides)
     return data
@@ -399,6 +400,11 @@ def test_atomic_requirement_origin_status_and_source_ref_rules():
     data = atomic_requirement(origin="source_derived")
     data.pop("source_refs")
     with pytest.raises(SchemaValidationError, match="source_refs"):
+        AtomicRequirement.from_dict(data)
+
+    data = atomic_requirement(origin="source_derived")
+    data.pop("candidate_ids")
+    with pytest.raises(SchemaValidationError, match="candidate_ids"):
         AtomicRequirement.from_dict(data)
 
     data = atomic_requirement(origin="assumption")

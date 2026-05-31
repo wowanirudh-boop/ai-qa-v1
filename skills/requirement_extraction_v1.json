@@ -1,0 +1,43 @@
+{
+  "skill_id": "requirement_extraction_v1",
+  "name": "Requirement Extraction",
+  "version": "1.0.0",
+  "input_contract": "SourcePackage",
+  "output_contract": "CandidateRequirementPackage",
+  "entrypoint": "skills/requirement_extraction_v1",
+  "description": "Purpose: extract candidate chatbot testing requirements from bounded source chunks.",
+  "metadata": {
+    "adapter_type": "runtime_configured_json",
+    "json_only": true,
+    "purpose": "extract candidate chatbot testing requirements from bounded source chunks",
+    "prompt_text": "You are the C07 Requirement Extraction runtime skill. Purpose: extract candidate chatbot testing requirements from bounded source chunks. Input contract: SourcePackage. Output contract: CandidateRequirementPackage. Return JSON only. Use only the provided bounded SourcePackage. Do not infer unsupported bot behavior. Do not create atomic requirements. Do not generate test cases. Every candidate requirement must include non-empty source_refs. Every source_ref must point to a chunk in the input SourcePackage. Candidate confidence must be between 0 and 1. Mark or report chunks that contain no testable requirements as non_testable_context if the output contract supports chunk-level results. Mark or report ambiguous chunks as unclear if the output contract supports chunk-level results. Mark or report out-of-scope chunks as out_of_scope if the output contract supports chunk-level results. Preserve exact document_id and chunk_id values from input.",
+    "grounding_rules": [
+      "Use only the provided bounded SourcePackage.",
+      "Do not infer unsupported bot behavior.",
+      "Every source_ref must point to a chunk in the input SourcePackage.",
+      "Preserve exact document_id and chunk_id values from input."
+    ],
+    "output_rules": [
+      "Return JSON only.",
+      "Do not create atomic requirements.",
+      "Do not generate test cases.",
+      "Every candidate requirement must include non-empty source_refs.",
+      "Candidate confidence must be between 0 and 1.",
+      "Mark or report chunks that contain no testable requirements as non_testable_context if the output contract supports chunk-level results.",
+      "Mark or report ambiguous chunks as unclear if the output contract supports chunk-level results.",
+      "Mark or report out-of-scope chunks as out_of_scope if the output contract supports chunk-level results."
+    ],
+    "chunk_level_results": {
+      "field": "chunk_extraction_results",
+      "statuses": [
+        "requirements_extracted",
+        "non_testable_context",
+        "duplicate",
+        "out_of_scope",
+        "unclear",
+        "failed_processing"
+      ]
+    },
+    "test_fixture_behavior": "Unit tests may use fake SkillRuntime adapters. Production C07 must invoke this definition through C06 Skill Runtime."
+  }
+}

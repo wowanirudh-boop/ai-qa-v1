@@ -609,11 +609,12 @@ class AtomicRequirement(SchemaModel):
             raise SchemaValidationError("status=inferred is only allowed with origin=inferred")
         if self.origin == RequirementOrigin.SOURCE_DERIVED:
             _validate_source_refs(self.source_refs, "source_refs", require_non_empty=True, require_chunk_id=True)
+            _validate_id_list(self.candidate_ids or [], "candidate_ids", require_non_empty=True)
         else:
             _validate_source_refs(self.source_refs, "source_refs", require_chunk_id=True)
             if self.approval_required is not True:
                 raise SchemaValidationError("approval_required must be true for non-source requirement origins")
-        if self.candidate_ids is not None:
+        if self.origin != RequirementOrigin.SOURCE_DERIVED and self.candidate_ids is not None:
             _validate_id_list(self.candidate_ids, "candidate_ids")
         if self.conflicts_with is not None:
             _validate_id_list(self.conflicts_with, "conflicts_with")

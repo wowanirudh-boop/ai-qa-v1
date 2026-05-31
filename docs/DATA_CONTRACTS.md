@@ -352,6 +352,7 @@ Validation rules:
 - Do not add `assumption`, `user_added`, or `system_default` to the status enum.
 - If `status` is `inferred`, it is a lifecycle state for inferred requirements that have not yet been validated, and should only be used with `origin` set to `inferred`.
 - Source-derived requirements must have `source_refs`.
+- Source-derived requirements must have non-empty `candidate_ids`.
 - Validated source-derived requirements must have non-empty `source_refs`.
 - Requirements with `origin` set to `inferred`, `assumption`, `user_added`, or `system_default` may lack `source_refs`, but must require approval before export.
 - Conflicting requirements cannot generate normal exportable obligations.
@@ -463,6 +464,7 @@ JSON example:
       "requirement_type": "functional",
       "status": "validated",
       "origin": "source_derived",
+      "candidate_ids": ["cand_001"],
       "source_refs": [
         {
           "document_id": "doc_001",

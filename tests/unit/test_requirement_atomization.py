@@ -482,7 +482,7 @@ def test_source_derived_skill_output_without_candidate_ids_fails(tmp_path):
     )
     runtime, _adapter = runtime_with_adapter(artifact_root, skill_output)
 
-    with pytest.raises(InvalidAtomicRequirementLedgerError, match="candidate_ids"):
+    with pytest.raises(RequirementAtomizationSkillError, match="candidate_ids"):
         atomize_requirements_from_candidate_package_artifact(
             candidate_artifact.path,
             requirement_atomization_skill_definition(),

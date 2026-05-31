@@ -23,6 +23,9 @@
     "requirement_type": "functional",
     "status": "validated",
     "origin": "source_derived",
+    "candidate_ids": [
+      "cand_001"
+    ],
     "source_refs": [
       {
         "document_id": "doc_001",
