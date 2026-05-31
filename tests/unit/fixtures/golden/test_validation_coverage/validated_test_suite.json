@@ -1,0 +1,119 @@
+{
+  "draft_suite_id": "draft_suite_001",
+  "project_id": "demo_chatbot",
+  "test_cases": [
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_contains_request",
+          "expected": "The bot asks for the order number before providing status.",
+          "target": "bot.final_response"
+        }
+      ],
+      "export_eligible": true,
+      "obligation_ids": [
+        "obl_001"
+      ],
+      "requirement_ids": [
+        "req_001"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "valid",
+      "test_case_id": "tc_001",
+      "title": "Order status requires order number",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Where is my order?",
+          "turn_id": "turn_001"
+        }
+      ]
+    },
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_contains_request",
+          "expected": "The bot asks for the order number before providing status.",
+          "target": "bot.final_response"
+        }
+      ],
+      "export_eligible": false,
+      "obligation_ids": [
+        "obl_missing"
+      ],
+      "rejection_reasons": [
+        "unknown obligation obl_missing"
+      ],
+      "requirement_ids": [
+        "req_001"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "rejected",
+      "test_case_id": "tc_002",
+      "title": "Unknown obligation is rejected",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Where is my order?",
+          "turn_id": "turn_001"
+        }
+      ]
+    },
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_contains_request",
+          "expected": "The bot may show order status without an order number.",
+          "target": "bot.final_response"
+        }
+      ],
+      "export_eligible": false,
+      "obligation_ids": [
+        "obl_002"
+      ],
+      "rejection_reasons": [
+        "conflicting requirement req_002",
+        "non-exportable obligation obl_002"
+      ],
+      "requirement_ids": [
+        "req_002"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_002",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "needs_review",
+      "test_case_id": "tc_003",
+      "title": "Conflicting order status path needs review",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Can you show my order status?",
+          "turn_id": "turn_001"
+        }
+      ]
+    }
+  ],
+  "validated_suite_id": "validated_suite_001",
+  "validation_summary": {
+    "export_eligible": 1,
+    "needs_review": 1,
+    "rejected": 1,
+    "valid": 1
+  }
+}

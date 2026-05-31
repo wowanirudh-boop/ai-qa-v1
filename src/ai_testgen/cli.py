@@ -30,6 +30,7 @@ from ai_testgen.test_generation import (
     TestGenerationError,
     generate_tests_from_obligation_ledger_artifact,
 )
+from ai_testgen.test_validation import TestValidationError, validate_tests_from_draft_suite_artifact
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate_tests_parser.add_argument("--oracle-skill-definition", type=Path, default=DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH)
     generate_tests_parser.set_defaults(func=_generate_tests)
 
+    validate_tests_parser = subcommands.add_parser("validate-tests")
+    validate_tests_parser.add_argument("--draft-suite", required=True, type=Path)
+    validate_tests_parser.set_defaults(func=_validate_tests)
+
     return parser
 
 
@@ -95,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         RequirementGovernanceError,
         TestObligationPlanningError,
         TestGenerationError,
+        TestValidationError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -150,6 +156,13 @@ def _generate_tests(args: argparse.Namespace) -> int:
         args.oracle_skill_definition,
     )
     print(f"Generated draft tests saved to {result.draft_suite_path}")
+    return 0
+
+
+def _validate_tests(args: argparse.Namespace) -> int:
+    result = validate_tests_from_draft_suite_artifact(args.draft_suite)
+    print(f"Validated tests saved to {result.validated_suite_path}")
+    print(f"Coverage report saved to {result.coverage_report_path}")
     return 0
 
 

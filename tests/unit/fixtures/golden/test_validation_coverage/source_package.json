@@ -1,0 +1,31 @@
+{
+  "checksum": "sha256:pkg001",
+  "chunks": [
+    {
+      "checksum": "sha256:chunk001",
+      "chunk_id": "chunk_001",
+      "document_id": "doc_001",
+      "processing_status": "requirements_extracted",
+      "text": "The bot must ask for an order number before showing order status."
+    },
+    {
+      "checksum": "sha256:chunk002",
+      "chunk_id": "chunk_002",
+      "document_id": "doc_001",
+      "processing_status": "requirements_extracted",
+      "text": "The bot may show order status without asking for an order number."
+    },
+    {
+      "checksum": "sha256:chunk003",
+      "chunk_id": "chunk_003",
+      "document_id": "doc_001",
+      "processing_status": "non_testable_context",
+      "text": "Background support policy context."
+    }
+  ],
+  "document_ids": [
+    "doc_001"
+  ],
+  "project_id": "demo_chatbot",
+  "source_package_id": "source_pkg_001"
+}
