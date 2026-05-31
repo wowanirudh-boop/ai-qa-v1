@@ -1,0 +1,20 @@
+{
+  "governed_ledger_id": "gov_ledger_001",
+  "obligation_ledger_id": "obl_ledger_001",
+  "obligations": [
+    {
+      "description": "Verify order status is not provided before an order number is collected.",
+      "obligation_id": "obl_001",
+      "obligation_type": "positive",
+      "requirement_id": "req_001",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "planned"
+    }
+  ],
+  "project_id": "demo_chatbot"
+}

@@ -1,0 +1,44 @@
+{
+  "draft_suite_id": "draft_suite_001",
+  "obligation_ledger_id": "obl_ledger_001",
+  "project_id": "demo_chatbot",
+  "skill_run_ids": [
+    "skill_run_001",
+    "skill_run_002"
+  ],
+  "test_cases": [
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_contains_request",
+          "expected": "The bot asks for the order number before providing status.",
+          "target": "bot.final_response"
+        }
+      ],
+      "obligation_ids": [
+        "obl_001"
+      ],
+      "requirement_ids": [
+        "req_001"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "draft",
+      "test_case_id": "tc_001",
+      "title": "Order status requires order number",
+      "turns": [
+        {
+          "expected_intent": "check_order_status",
+          "speaker": "user",
+          "text": "Where is my order?",
+          "turn_id": "turn_001"
+        }
+      ]
+    }
+  ]
+}

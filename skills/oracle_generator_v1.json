@@ -1,0 +1,27 @@
+{
+  "description": "Purpose: draft expected outcomes and assertions for C11 draft chatbot test cases.",
+  "entrypoint": "skills/oracle_generator_v1",
+  "input_contract": "DraftTestSuite",
+  "metadata": {
+    "adapter_type": "llm_json",
+    "json_only": true,
+    "prompt_text": "You are the C11 Oracle Generator runtime skill. Purpose: draft expected outcomes and assertions for C11 draft chatbot test cases. Read only the provided DraftTestSuite. Return a DraftTestSuite. Return JSON only. Do not read raw source documents. Do not create requirements. Do not create obligations. Do not validate coverage. Do not decide export eligibility. Preserve test_case_id, requirement_ids, obligation_ids, source_refs, title, status, and conversation turns. Add or refine assertions only when grounded in the draft test case and source_refs already present. Assertions must be specific enough for a validator or reviewer to evaluate.",
+    "rules": [
+      "Return JSON only.",
+      "Read only the provided DraftTestSuite.",
+      "Do not read raw source documents.",
+      "Do not create requirements.",
+      "Do not create obligations.",
+      "Do not validate coverage.",
+      "Do not decide export eligibility.",
+      "Preserve test_case_id, requirement_ids, obligation_ids, source_refs, title, status, and conversation turns.",
+      "Add or refine assertions only when grounded in the draft test case and source_refs already present.",
+      "Assertions must be specific enough for a validator or reviewer to evaluate."
+    ],
+    "test_fixture_behavior": "Tests may use fake SkillRuntime adapters, but production C11 must invoke this skill definition through C06 Skill Runtime."
+  },
+  "name": "Oracle Generator",
+  "output_contract": "DraftTestSuite",
+  "skill_id": "oracle_generator_v1",
+  "version": "1.0.0"
+}

@@ -24,6 +24,12 @@ from ai_testgen.obligation_planning import (
     plan_obligations_from_governed_ledger_artifact,
 )
 from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
+from ai_testgen.test_generation import (
+    DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH,
+    DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH,
+    TestGenerationError,
+    generate_tests_from_obligation_ledger_artifact,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
     obligations_parser.add_argument("--governed-ledger", required=True, type=Path)
     obligations_parser.set_defaults(func=_plan_obligations)
 
+    generate_tests_parser = subcommands.add_parser("generate-tests")
+    generate_tests_parser.add_argument("--obligations", required=True, type=Path)
+    generate_tests_parser.add_argument("--skill-definition", type=Path, default=DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH)
+    generate_tests_parser.add_argument("--oracle-skill-definition", type=Path, default=DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH)
+    generate_tests_parser.set_defaults(func=_generate_tests)
+
     return parser
 
 
@@ -82,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         RequirementAtomizationError,
         RequirementGovernanceError,
         TestObligationPlanningError,
+        TestGenerationError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -127,6 +140,16 @@ def _govern_requirements(args: argparse.Namespace) -> int:
 def _plan_obligations(args: argparse.Namespace) -> int:
     result = plan_obligations_from_governed_ledger_artifact(args.governed_ledger)
     print(f"Planned test obligations saved to {result.obligation_ledger_path}")
+    return 0
+
+
+def _generate_tests(args: argparse.Namespace) -> int:
+    result = generate_tests_from_obligation_ledger_artifact(
+        args.obligations,
+        args.skill_definition,
+        args.oracle_skill_definition,
+    )
+    print(f"Generated draft tests saved to {result.draft_suite_path}")
     return 0
 
 

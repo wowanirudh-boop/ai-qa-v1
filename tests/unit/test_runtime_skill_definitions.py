@@ -71,3 +71,63 @@ def test_requirement_atomization_skill_definition_includes_required_rules():
 
     for phrase in required_phrases:
         assert phrase in definition_text
+
+
+def test_test_case_writer_skill_definition_loads_with_c11_contracts():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "test_case_writer_v1.json")
+
+    assert definition.skill_id == "test_case_writer_v1"
+    assert definition.input_contract == "TestObligationLedger"
+    assert definition.output_contract == "DraftTestSuite"
+
+
+def test_test_case_writer_skill_definition_includes_required_rules():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "test_case_writer_v1.json")
+    definition_text = json.dumps(definition.to_dict(), sort_keys=True)
+
+    required_phrases = [
+        "draft chatbot test cases from bounded test obligations",
+        "Return JSON only",
+        "Read only the provided bounded TestObligationLedger",
+        "Do not read raw source documents",
+        "Do not create requirements",
+        "Do not create obligations",
+        "Do not validate coverage",
+        "Do not decide export eligibility",
+        "Every test case must have non-empty requirement_ids",
+        "Every test case must have non-empty obligation_ids",
+        "Every obligation_id must come from the input TestObligationLedger",
+        "Preserve source_refs from linked obligations",
+    ]
+
+    for phrase in required_phrases:
+        assert phrase in definition_text
+
+
+def test_oracle_generator_skill_definition_loads_with_c11_contracts():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "oracle_generator_v1.json")
+
+    assert definition.skill_id == "oracle_generator_v1"
+    assert definition.input_contract == "DraftTestSuite"
+    assert definition.output_contract == "DraftTestSuite"
+
+
+def test_oracle_generator_skill_definition_includes_required_rules():
+    definition = load_skill_definition(REPO_ROOT / "skills" / "oracle_generator_v1.json")
+    definition_text = json.dumps(definition.to_dict(), sort_keys=True)
+
+    required_phrases = [
+        "draft expected outcomes and assertions",
+        "Return JSON only",
+        "Read only the provided DraftTestSuite",
+        "Do not read raw source documents",
+        "Do not create requirements",
+        "Do not create obligations",
+        "Do not validate coverage",
+        "Do not decide export eligibility",
+        "Preserve test_case_id, requirement_ids, obligation_ids, source_refs, title, status, and conversation turns",
+        "Assertions must be specific enough for a validator or reviewer to evaluate",
+    ]
+
+    for phrase in required_phrases:
+        assert phrase in definition_text

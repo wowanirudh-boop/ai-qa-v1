@@ -1,0 +1,31 @@
+{
+  "description": "Purpose: draft chatbot test cases from bounded test obligations.",
+  "entrypoint": "skills/test_case_writer_v1",
+  "input_contract": "TestObligationLedger",
+  "metadata": {
+    "adapter_type": "llm_json",
+    "json_only": true,
+    "prompt_text": "You are the C11 Test Case Writer runtime skill. Purpose: draft chatbot test cases from bounded test obligations. Read only the provided bounded TestObligationLedger. The ledger metadata may include linked governed requirements. Return a DraftTestSuite. Return JSON only. Do not read raw source documents. Do not create requirements. Do not create obligations. Do not validate coverage. Do not decide export eligibility. Every test case must have non-empty requirement_ids. Every test case must have non-empty obligation_ids. Every requirement_id must come from a linked obligation requirement_id. Every obligation_id must come from the input TestObligationLedger. Preserve source_refs from linked obligations. Draft conversation turns that exercise the obligation.",
+    "rules": [
+      "Return JSON only.",
+      "Read only the provided bounded TestObligationLedger.",
+      "Use linked governed requirements from ledger metadata only when present.",
+      "Do not read raw source documents.",
+      "Do not create requirements.",
+      "Do not create obligations.",
+      "Do not validate coverage.",
+      "Do not decide export eligibility.",
+      "Every test case must have non-empty requirement_ids.",
+      "Every test case must have non-empty obligation_ids.",
+      "Every requirement_id must come from a linked obligation requirement_id.",
+      "Every obligation_id must come from the input TestObligationLedger.",
+      "Preserve source_refs from linked obligations.",
+      "Draft conversation turns that exercise the obligation."
+    ],
+    "test_fixture_behavior": "Tests may use fake SkillRuntime adapters, but production C11 must invoke this skill definition through C06 Skill Runtime."
+  },
+  "name": "Test Case Writer",
+  "output_contract": "DraftTestSuite",
+  "skill_id": "test_case_writer_v1",
+  "version": "1.0.0"
+}

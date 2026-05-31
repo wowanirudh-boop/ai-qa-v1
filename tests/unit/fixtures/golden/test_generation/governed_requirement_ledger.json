@@ -1,0 +1,32 @@
+{
+  "atomic_ledger_id": "atomic_ledger_001",
+  "governance_summary": {
+    "conflicting": 0,
+    "duplicate": 0,
+    "inferred": 0,
+    "needs_clarification": 0,
+    "out_of_scope": 0,
+    "rejected": 0,
+    "validated": 1
+  },
+  "governed_ledger_id": "gov_ledger_001",
+  "project_id": "demo_chatbot",
+  "requirements": [
+    {
+      "candidate_ids": [
+        "cand_001"
+      ],
+      "origin": "source_derived",
+      "requirement_id": "req_001",
+      "requirement_type": "functional",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "statement": "The bot must ask for an order number before showing order status.",
+      "status": "validated"
+    }
+  ]
+}
