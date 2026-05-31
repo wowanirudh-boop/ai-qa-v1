@@ -1,0 +1,13 @@
+{
+  "approval_policy": {
+    "allow_export_without_review": false,
+    "require_human_approval_for_inferred": true
+  },
+  "bot_name": "Demo Support Bot",
+  "coverage_policy": {
+    "require_negative_tests": true,
+    "require_positive_tests": true
+  },
+  "project_id": "demo_chatbot",
+  "target_url": "https://example.test/chat"
+}

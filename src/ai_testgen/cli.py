@@ -15,6 +15,10 @@ from ai_testgen.requirement_atomization import (
     RequirementAtomizationError,
     atomize_requirements_from_candidate_package_artifact,
 )
+from ai_testgen.requirement_governance import (
+    RequirementGovernanceError,
+    govern_requirements_from_atomic_ledger_artifact,
+)
 from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
 
 
@@ -49,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     atomize_parser.add_argument("--skill-definition", type=Path)
     atomize_parser.set_defaults(func=_atomize_requirements)
 
+    govern_parser = subcommands.add_parser("govern-requirements")
+    govern_parser.add_argument("--atomic-ledger", required=True, type=Path)
+    govern_parser.set_defaults(func=_govern_requirements)
+
     return parser
 
 
@@ -64,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         SourceLedgerError,
         RequirementExtractionError,
         RequirementAtomizationError,
+        RequirementGovernanceError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -97,6 +106,12 @@ def _extract_requirements(args: argparse.Namespace) -> int:
 def _atomize_requirements(args: argparse.Namespace) -> int:
     result = atomize_requirements_from_candidate_package_artifact(args.candidates, args.skill_definition)
     print(f"Atomized requirements saved to {result.atomic_ledger_path}")
+    return 0
+
+
+def _govern_requirements(args: argparse.Namespace) -> int:
+    result = govern_requirements_from_atomic_ledger_artifact(args.atomic_ledger)
+    print(f"Governed requirements saved to {result.governed_ledger_path}")
     return 0
 
 
