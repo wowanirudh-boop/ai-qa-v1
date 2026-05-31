@@ -1,0 +1,48 @@
+{
+  "coverage_policy_snapshot": {
+    "require_negative_tests": true,
+    "require_positive_tests": true
+  },
+  "governed_ledger_id": "gov_ledger_001",
+  "obligation_ledger_id": "obl_ledger_001",
+  "obligations": [
+    {
+      "obligation_id": "obl_001",
+      "obligation_type": "positive",
+      "requirement_id": "req_001",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "planned"
+    },
+    {
+      "obligation_id": "obl_002",
+      "obligation_type": "negative",
+      "requirement_id": "req_001",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "planned"
+    },
+    {
+      "blocked_reason": "Conflicting requirement must be resolved before normal obligations can be planned.",
+      "obligation_id": "obl_003",
+      "obligation_type": "blocked_conflict",
+      "requirement_id": "req_003",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_003",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "blocked_unclear_requirement"
+    }
+  ],
+  "project_id": "demo_chatbot"
+}

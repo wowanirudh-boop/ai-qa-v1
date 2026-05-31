@@ -203,7 +203,9 @@ Obligations:
 
 Test obligation planning should be mostly deterministic.
 
-Code should use requirement type, coverage policy, executor capability, and requirement status to decide which obligations are required.
+For v1, C10 uses requirement type, `ProjectConfig.coverage_policy`, and requirement status to decide which obligations are required.
+
+Executor capability policy is optional/future for C10 unless and until it is explicitly defined in `docs/DATA_CONTRACTS.md`. C10 must not invent executor capability behavior. Executor-specific behavior is handled later by C11 when drafting executor-compatible tests, C12 when validating executor compatibility, and C14 when exporting to the executor contract.
 
 Runtime skills may assist later in writing natural test conversations, but they should not be the sole mechanism that decides which obligations exist.
 

@@ -79,7 +79,7 @@ The component is primarily deterministic, but may optionally call helper/reviewe
 | C07 | Requirement extraction | Skill-required | `SourcePackage` | `CandidateRequirementPackage` |
 | C08 | Requirement atomization | Skill-required | `CandidateRequirementPackage` | `AtomicRequirementLedger` |
 | C09 | Requirement governance | Hybrid | `AtomicRequirementLedger` | `GovernedRequirementLedger` |
-| C10 | Test obligation planning | Mostly code | `GovernedRequirementLedger` | `TestObligationLedger` |
+| C10 | Test obligation planning | Mostly code | `GovernedRequirementLedger` + `ProjectConfig.coverage_policy` | `TestObligationLedger` |
 | C11 | Test case generation | Skill-required | `TestObligationLedger` + requirements | `DraftTestSuite` |
 | C12 | Test validation and coverage | Mostly code | `DraftTestSuite` + ledgers | `ValidatedTestSuite`, `CoverageReport` |
 | C13 | Review report | Mostly code | Validated artifacts and findings | `ReviewReport` |
@@ -711,8 +711,9 @@ Mostly code.
 
 - `GovernedRequirementLedger`
 - `ProjectConfig`
-- coverage policy
-- executor capability policy
+- `ProjectConfig.coverage_policy`
+
+Executor capability policy is optional/future for C10 unless and until it is explicitly defined in `docs/DATA_CONTRACTS.md`. C10 v1 must not invent executor capability behavior. Executor-specific behavior belongs primarily to C11 test case generation, C12 test validation and coverage, and C14 executor export.
 
 ### Outputs
 
@@ -745,6 +746,7 @@ artifacts/{project_id}/{run_id}/06_test_obligations/test_obligation_ledger.json
 - conversational wording,
 - semantic assertion drafting,
 - raw document interpretation,
+- executor compatibility validation or export,
 - direct LLM calls.
 
 ### Done when

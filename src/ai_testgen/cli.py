@@ -19,6 +19,10 @@ from ai_testgen.requirement_governance import (
     RequirementGovernanceError,
     govern_requirements_from_atomic_ledger_artifact,
 )
+from ai_testgen.obligation_planning import (
+    TestObligationPlanningError,
+    plan_obligations_from_governed_ledger_artifact,
+)
 from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
 
 
@@ -57,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
     govern_parser.add_argument("--atomic-ledger", required=True, type=Path)
     govern_parser.set_defaults(func=_govern_requirements)
 
+    obligations_parser = subcommands.add_parser("plan-obligations")
+    obligations_parser.add_argument("--governed-ledger", required=True, type=Path)
+    obligations_parser.set_defaults(func=_plan_obligations)
+
     return parser
 
 
@@ -73,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         RequirementExtractionError,
         RequirementAtomizationError,
         RequirementGovernanceError,
+        TestObligationPlanningError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -112,6 +121,12 @@ def _atomize_requirements(args: argparse.Namespace) -> int:
 def _govern_requirements(args: argparse.Namespace) -> int:
     result = govern_requirements_from_atomic_ledger_artifact(args.atomic_ledger)
     print(f"Governed requirements saved to {result.governed_ledger_path}")
+    return 0
+
+
+def _plan_obligations(args: argparse.Namespace) -> int:
+    result = plan_obligations_from_governed_ledger_artifact(args.governed_ledger)
+    print(f"Planned test obligations saved to {result.obligation_ledger_path}")
     return 0
 
 

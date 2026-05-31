@@ -9,6 +9,8 @@ Own converting `GovernedRequirementLedger` into `TestObligationLedger`.
 - `GovernedRequirementLedger`
 - `ProjectConfig.coverage_policy`
 
+V1 policy input is limited to `ProjectConfig.coverage_policy`. Executor capability policy is deferred until an explicit contract is defined in `docs/DATA_CONTRACTS.md`; C10 must not invent executor capability behavior.
+
 Input artifact path conventions:
 
 - `artifacts/{project_id}/{run_id}/05_governed_requirements/governed_requirement_ledger.json`
@@ -79,6 +81,7 @@ Useful. Include validated, rejected, and conflicting requirements.
 Must not implement:
 
 - test case drafting
+- executor compatibility validation
 - runtime skill calls
 - coverage report generation
 - export package creation
@@ -88,4 +91,3 @@ Must not implement:
 - Governed requirements become a valid obligation ledger.
 - Tests prove rejected and conflicting requirements are handled correctly.
 - No draft tests are produced.
-

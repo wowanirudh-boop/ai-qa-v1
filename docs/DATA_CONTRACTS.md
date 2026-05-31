@@ -36,6 +36,10 @@ Validation rules:
 - `coverage_policy` is required.
 - `approval_policy` is required.
 
+V1 note:
+
+- Executor capability policy is deferred/future and is not a required C10 data contract. C10 obligation planning uses `ProjectConfig.coverage_policy` only unless a future data contract explicitly defines executor capability policy.
+
 JSON example:
 
 ```json
