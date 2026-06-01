@@ -836,8 +836,9 @@ Mostly code.
 - `DraftTestSuite`
 - `GovernedRequirementLedger`
 - `TestObligationLedger`
-- `SourcePackage`
-- `ProjectConfig`
+- optional `SourcePackage` for source chunk coverage
+
+Policy-based validation may consume `ProjectConfig` in a future version only if the C12 component spec and data contracts define that input.
 
 ### Outputs
 

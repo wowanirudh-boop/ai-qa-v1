@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import ai_testgen.cli as cli
+import ai_testgen.coverage as coverage_module
 import ai_testgen.test_validation as test_validation
 from ai_testgen.artifact_store import ArtifactStore
 from ai_testgen.schemas import CoverageReport, ValidatedTestSuite
@@ -409,6 +410,32 @@ def test_missing_governed_ledger_artifact_is_reported(tmp_path):
     ).exists()
 
 
+def test_malformed_draft_suite_artifact_is_rejected_before_outputs(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    malformed_draft_suite = draft_suite_data()
+    malformed_draft_suite.pop("draft_suite_id")
+    draft_artifact = write_draft_suite(store, data=malformed_draft_suite)
+
+    with pytest.raises(DraftTestSuiteArtifactError, match="draft_suite_id"):
+        validate_tests_from_draft_suite_artifact(draft_artifact.path)
+
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "08_validated_tests"
+        / "validated_test_suite.json"
+    ).exists()
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "08_validated_tests"
+        / "coverage_report.json"
+    ).exists()
+
+
 def test_draft_suite_artifact_path_must_match_c12_input_convention(tmp_path):
     invalid_path = (
         tmp_path
@@ -530,21 +557,28 @@ def test_c12_writes_no_future_component_artifacts(tmp_path):
 
 
 def test_c12_implementation_has_no_future_component_skill_or_provider_dependencies():
-    source = inspect.getsource(test_validation)
+    source = "\n".join(
+        [
+            inspect.getsource(test_validation),
+            inspect.getsource(coverage_module),
+        ]
+    )
 
     for forbidden in (
         "SkillRuntime",
         "SkillDefinition",
+        "run_skill",
         "ExecutorExportPackage",
         "ReviewReport",
-        "op" + "enai",
-        "anth" + "ropic",
+        "openai",
+        "anthropic",
+        "google.generativeai",
         "lang" + "chain",
         "llama" + "_index",
-        "req" + "uests",
-        "ht" + "tpx",
-        "url" + "lib",
-        "so" + "cket",
-        "sub" + "process",
+        "requests",
+        "httpx",
+        "urllib",
+        "socket",
+        "subprocess",
     ):
         assert forbidden not in source
