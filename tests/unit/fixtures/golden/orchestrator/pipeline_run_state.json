@@ -1,0 +1,38 @@
+{
+  "artifact_paths": {
+    "atomic_requirement_ledger": "artifacts/demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger.json",
+    "candidate_requirement_package": "artifacts/demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json",
+    "coverage_report": "artifacts/demo_chatbot/run_001/08_validated_tests/coverage_report.json",
+    "documents": "artifacts/demo_chatbot/run_001/01_documents/documents.json",
+    "draft_test_suite": "artifacts/demo_chatbot/run_001/07_draft_tests/draft_test_suite.json",
+    "executor_export_package": "artifacts/demo_chatbot/run_001/10_executor_export/executor_export_package.json",
+    "executor_tests": "artifacts/demo_chatbot/run_001/10_executor_export/tests.json",
+    "governed_requirement_ledger": "artifacts/demo_chatbot/run_001/05_governed_requirements/governed_requirement_ledger.json",
+    "project_config": "artifacts/demo_chatbot/run_001/00_project_config/project_config.json",
+    "review_report": "artifacts/demo_chatbot/run_001/09_review_report/review_report.md",
+    "review_report_metadata": "artifacts/demo_chatbot/run_001/09_review_report/review_report_metadata.json",
+    "source_package": "artifacts/demo_chatbot/run_001/02_source_package/source_package.json",
+    "test_obligation_ledger": "artifacts/demo_chatbot/run_001/06_test_obligations/test_obligation_ledger.json",
+    "validated_test_suite": "artifacts/demo_chatbot/run_001/08_validated_tests/validated_test_suite.json"
+  },
+  "completed_stages": [
+    "C03_project_config",
+    "C04_document_ingestion",
+    "C05_source_ledger",
+    "C06_skill_runtime",
+    "C07_requirement_extraction",
+    "C08_requirement_atomization",
+    "C09_requirement_governance",
+    "C10_obligation_planning",
+    "C11_test_generation",
+    "C12_test_validation_coverage",
+    "C13_review_report",
+    "C14_executor_export",
+    "C15_orchestrator"
+  ],
+  "current_stage": "C15_orchestrator",
+  "pipeline_run_id": "pipeline_run_001",
+  "project_id": "demo_chatbot",
+  "run_id": "run_001",
+  "status": "succeeded"
+}

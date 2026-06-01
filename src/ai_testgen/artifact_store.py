@@ -75,6 +75,22 @@ class ArtifactStore:
         path = self.artifact_root.joinpath(*project_parts, *run_parts, *stage_parts, file_name)
         return self._require_under_root(path)
 
+    def run_artifact_path(
+        self,
+        project_id: str,
+        run_id: str,
+        artifact_name: str,
+    ) -> Path:
+        project_parts = _path_parts(project_id, "project_id", allow_nested=False)
+        run_parts = _path_parts(run_id, "run_id", allow_nested=False)
+        artifact_parts = _path_parts(artifact_name, "artifact_name", allow_nested=False)
+        artifact_stem = artifact_parts[0]
+        if artifact_stem.endswith(".json"):
+            raise ArtifactPathError("artifact_name must not include the .json suffix")
+
+        path = self.artifact_root.joinpath(*project_parts, *run_parts, f"{artifact_stem}.json")
+        return self._require_under_root(path)
+
     def write_json(
         self,
         project_id: str,
@@ -95,6 +111,24 @@ class ArtifactStore:
         self._write_new_file(path, content)
         return StoredArtifact(path=path, checksum=_checksum_bytes(content))
 
+    def write_run_json(
+        self,
+        project_id: str,
+        run_id: str,
+        artifact_name: str,
+        artifact: Mapping[str, Any] | SchemaModel,
+        *,
+        replace: bool = False,
+    ) -> StoredArtifact:
+        data = _artifact_data(artifact)
+        path = self.run_artifact_path(project_id, run_id, artifact_name)
+        content = _stable_json_bytes(data)
+        if replace:
+            self._write_replace_file(path, content)
+        else:
+            self._write_new_file(path, content)
+        return StoredArtifact(path=path, checksum=_checksum_bytes(content))
+
     def read_json(
         self,
         project_id: str,
@@ -105,6 +139,25 @@ class ArtifactStore:
         version: int | None = None,
     ) -> dict[str, Any]:
         path = self.artifact_path(project_id, run_id, stage, artifact_name, version=version)
+        if not path.exists():
+            raise ArtifactNotFoundError(f"Artifact not found: {path}")
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise MalformedArtifactError(f"Malformed JSON artifact: {path}") from exc
+
+        if not isinstance(data, dict):
+            raise ArtifactTypeError(f"Artifact JSON must be a mapping: {path}")
+        return data
+
+    def read_run_json(
+        self,
+        project_id: str,
+        run_id: str,
+        artifact_name: str,
+    ) -> dict[str, Any]:
+        path = self.run_artifact_path(project_id, run_id, artifact_name)
         if not path.exists():
             raise ArtifactNotFoundError(f"Artifact not found: {path}")
 
@@ -130,6 +183,18 @@ class ArtifactStore:
         if not isinstance(model_type, type) or not issubclass(model_type, SchemaModel):
             raise ArtifactTypeError("model_type must be a SchemaModel subclass")
         data = self.read_json(project_id, run_id, stage, artifact_name, version=version)
+        return model_type.from_dict(data)
+
+    def load_run_model(
+        self,
+        model_type: type[ModelT],
+        project_id: str,
+        run_id: str,
+        artifact_name: str,
+    ) -> ModelT:
+        if not isinstance(model_type, type) or not issubclass(model_type, SchemaModel):
+            raise ArtifactTypeError("model_type must be a SchemaModel subclass")
+        data = self.read_run_json(project_id, run_id, artifact_name)
         return model_type.from_dict(data)
 
     def exists(
@@ -182,6 +247,23 @@ class ArtifactStore:
                 handle.write(content)
             if path.exists():
                 raise ArtifactExistsError(f"Artifact already exists: {path}")
+            os.replace(temp_path, path)
+        finally:
+            if temp_path is not None and temp_path.exists():
+                temp_path.unlink()
+
+    def _write_replace_file(self, path: Path, content: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path: Path | None = None
+        try:
+            descriptor, temp_name = tempfile.mkstemp(
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                dir=path.parent,
+            )
+            temp_path = Path(temp_name)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
             os.replace(temp_path, path)
         finally:
             if temp_path is not None and temp_path.exists():

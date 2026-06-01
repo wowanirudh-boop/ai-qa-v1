@@ -11,7 +11,7 @@ from ai_testgen.artifact_store import (
     ArtifactTypeError,
     MalformedArtifactError,
 )
-from ai_testgen.schemas import SchemaValidationError, SourceChunk
+from ai_testgen.schemas import PipelineRunState, SchemaValidationError, SourceChunk
 
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "golden" / "artifact_store"
@@ -24,6 +24,20 @@ def source_chunk_data(**overrides: object) -> dict:
         "text": "The bot must ask for an order number.",
         "checksum": "sha256:def456",
         "processing_status": "not_processed",
+    }
+    data.update(overrides)
+    return data
+
+
+def pipeline_state_data(**overrides: object) -> dict:
+    data = {
+        "pipeline_run_id": "pipeline_run_001",
+        "project_id": "demo_chatbot",
+        "run_id": "run_001",
+        "status": "running",
+        "current_stage": "C03_project_config",
+        "artifact_paths": {},
+        "completed_stages": [],
     }
     data.update(overrides)
     return data
@@ -186,6 +200,95 @@ def test_schema_loading_rejects_invalid_contract_data(tmp_path):
 
     with pytest.raises(SchemaValidationError, match="processing_status"):
         store.load_model(SourceChunk, "demo_chatbot", "run_001", "02_source_package", "source_chunk")
+
+
+def test_run_root_json_artifact_round_trip(tmp_path):
+    store = ArtifactStore(tmp_path / "artifacts")
+    state = PipelineRunState.from_dict(pipeline_state_data())
+
+    written = store.write_run_json(
+        "demo_chatbot",
+        "run_001",
+        "pipeline_run_state",
+        state,
+    )
+
+    assert written.path == (
+        tmp_path
+        / "artifacts"
+        / "demo_chatbot"
+        / "run_001"
+        / "pipeline_run_state.json"
+    )
+    assert store.run_artifact_path("demo_chatbot", "run_001", "pipeline_run_state") == written.path
+    assert store.read_run_json("demo_chatbot", "run_001", "pipeline_run_state") == state.to_dict()
+    assert store.load_run_model(
+        PipelineRunState,
+        "demo_chatbot",
+        "run_001",
+        "pipeline_run_state",
+    ) == state
+
+
+def test_run_root_json_can_be_replaced_for_mutable_run_state(tmp_path):
+    store = ArtifactStore(tmp_path / "artifacts")
+    running = PipelineRunState.from_dict(pipeline_state_data(status="running"))
+    succeeded = PipelineRunState.from_dict(
+        pipeline_state_data(
+            status="succeeded",
+            current_stage="C15_orchestrator",
+            completed_stages=[
+                "C03_project_config",
+                "C04_document_ingestion",
+                "C05_source_ledger",
+                "C06_skill_runtime",
+                "C07_requirement_extraction",
+                "C08_requirement_atomization",
+                "C09_requirement_governance",
+                "C10_obligation_planning",
+                "C11_test_generation",
+                "C12_test_validation_coverage",
+                "C13_review_report",
+                "C14_executor_export",
+                "C15_orchestrator",
+            ],
+        )
+    )
+
+    first = store.write_run_json("demo_chatbot", "run_001", "pipeline_run_state", running)
+    second = store.write_run_json(
+        "demo_chatbot",
+        "run_001",
+        "pipeline_run_state",
+        succeeded,
+        replace=True,
+    )
+
+    assert first.path == second.path
+    assert store.load_run_model(
+        PipelineRunState,
+        "demo_chatbot",
+        "run_001",
+        "pipeline_run_state",
+    ) == succeeded
+
+
+def test_run_root_schema_loading_rejects_invalid_pipeline_state(tmp_path):
+    store = ArtifactStore(tmp_path / "artifacts")
+    store.write_run_json(
+        "demo_chatbot",
+        "run_001",
+        "pipeline_run_state",
+        pipeline_state_data(status="not_a_status"),
+    )
+
+    with pytest.raises(SchemaValidationError, match="status"):
+        store.load_run_model(
+            PipelineRunState,
+            "demo_chatbot",
+            "run_001",
+            "pipeline_run_state",
+        )
 
 
 def test_unexpected_artifact_types_are_rejected(tmp_path):

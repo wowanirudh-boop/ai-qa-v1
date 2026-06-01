@@ -25,6 +25,7 @@ from ai_testgen.obligation_planning import (
     TestObligationPlanningError,
     plan_obligations_from_governed_ledger_artifact,
 )
+from ai_testgen.orchestrator import PipelineOrchestrationError, PipelineRunOptions, run_pipeline
 from ai_testgen.source_ledger import SourceLedgerError, build_source_package_from_documents_artifact
 from ai_testgen.test_generation import (
     DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH,
@@ -92,6 +93,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--validated-suite", required=True, type=Path)
     export_parser.set_defaults(func=_export_tests)
 
+    run_parser = subcommands.add_parser("run")
+    run_parser.add_argument("--config", type=Path, default=Path("project_config.json"))
+    run_parser.add_argument("--run-id", required=True)
+    run_parser.add_argument("--artifact-root", type=Path)
+    run_parser.add_argument("--skip-review", action="store_true")
+    run_parser.add_argument("--skip-export", action="store_true")
+    run_parser.set_defaults(func=_run_pipeline)
+
     return parser
 
 
@@ -113,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         TestValidationError,
         ReviewReportError,
         ExecutorExportError,
+        PipelineOrchestrationError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -189,6 +199,20 @@ def _export_tests(args: argparse.Namespace) -> int:
     result = export_tests_from_validated_suite_artifact(args.validated_suite)
     print(f"Executor tests saved to {result.tests_path}")
     print(f"Executor export package saved to {result.export_package_path}")
+    return 0
+
+
+def _run_pipeline(args: argparse.Namespace) -> int:
+    result = run_pipeline(
+        args.config,
+        args.run_id,
+        artifact_root=args.artifact_root,
+        options=PipelineRunOptions(
+            include_review=not args.skip_review,
+            include_export=not args.skip_export,
+        ),
+    )
+    print(f"Pipeline run state saved to {result.state_path}")
     return 0
 
 
