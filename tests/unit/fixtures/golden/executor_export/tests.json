@@ -1,0 +1,44 @@
+{
+  "bot_name": "Demo Support Bot",
+  "format_version": "executor_json_v1",
+  "project_id": "demo_chatbot",
+  "target_url": "https://example.test/chat",
+  "tests": [
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_contains_request",
+          "expected": "The bot asks for the order number before providing status.",
+          "target": "bot.final_response"
+        }
+      ],
+      "obligation_ids": [
+        "obl_001"
+      ],
+      "priority": "p1",
+      "requirement_ids": [
+        "req_001"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "tags": [
+        "order_status"
+      ],
+      "test_case_id": "tc_001",
+      "title": "Order status requires order number",
+      "turns": [
+        {
+          "speaker": "user",
+          "text": "Where is my order?",
+          "turn_id": "turn_001"
+        }
+      ]
+    }
+  ],
+  "validated_suite_id": "validated_suite_001"
+}

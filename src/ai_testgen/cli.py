@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ai_testgen.document_ingestion import DocumentIngestionError, ingest_documents_from_config_artifact
+from ai_testgen.executor_export import ExecutorExportError, export_tests_from_validated_suite_artifact
 from ai_testgen.project_config import ProjectConfigError, load_project_config, save_project_config
 from ai_testgen.requirement_extraction import (
     DEFAULT_SKILL_DEFINITION_PATH,
@@ -87,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     review_report_parser.add_argument("--validated-suite", required=True, type=Path)
     review_report_parser.set_defaults(func=_review_report)
 
+    export_parser = subcommands.add_parser("export")
+    export_parser.add_argument("--validated-suite", required=True, type=Path)
+    export_parser.set_defaults(func=_export_tests)
+
     return parser
 
 
@@ -107,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         TestGenerationError,
         TestValidationError,
         ReviewReportError,
+        ExecutorExportError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -176,6 +182,13 @@ def _review_report(args: argparse.Namespace) -> int:
     result = generate_review_report_from_validated_suite_artifact(args.validated_suite)
     print(f"Review report saved to {result.report_path}")
     print(f"Review report metadata saved to {result.metadata_path}")
+    return 0
+
+
+def _export_tests(args: argparse.Namespace) -> int:
+    result = export_tests_from_validated_suite_artifact(args.validated_suite)
+    print(f"Executor tests saved to {result.tests_path}")
+    print(f"Executor export package saved to {result.export_package_path}")
     return 0
 
 
