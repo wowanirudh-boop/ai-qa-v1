@@ -82,7 +82,7 @@ The component is primarily deterministic, but may optionally call helper/reviewe
 | C10 | Test obligation planning | Mostly code | `GovernedRequirementLedger` + `ProjectConfig.coverage_policy` | `TestObligationLedger` |
 | C11 | Test case generation | Skill-required | `TestObligationLedger` + requirements | `DraftTestSuite` |
 | C12 | Test validation and coverage | Mostly code | `DraftTestSuite` + ledgers | `ValidatedTestSuite`, `CoverageReport` |
-| C13 | Review report | Mostly code | Validated artifacts and findings | `ReviewReport` |
+| C13 | Review report | Mostly code | Validated artifacts and findings | Review report + `ReviewReportMetadata` |
 | C14 | Executor export | Code-only | Approved validated suite | `ExecutorExportPackage` |
 | C15 | End-to-end orchestrator | Code-only orchestration | Project/run inputs | Pipeline run artifacts |
 
@@ -199,7 +199,7 @@ Code-only.
 - `DraftTestSuite`
 - `ValidatedTestSuite`
 - `CoverageReport`
-- `ReviewReport`
+- `ReviewReportMetadata`
 - `ExecutorExportPackage`
 - `SkillDefinition`
 - `SkillRunRecord`
@@ -903,24 +903,19 @@ Mostly code.
 - `CoverageReport`
 - `GovernedRequirementLedger`
 - `TestObligationLedger`
-- source status artifacts
-- rejected test findings
+
+C13 consumes artifacts that have already passed upstream validation. It reports traceability and coverage status from those artifacts, but C12 owns full test link validation and coverage calculation.
 
 ### Outputs
 
-- `ReviewReport`
+- Human-readable review report.
+- `ReviewReportMetadata`
 
 ### Artifact output
 
 ```text
-artifacts/{project_id}/{run_id}/09_review/review_report.json
-```
-
-Optional readable outputs may include:
-
-```text
-artifacts/{project_id}/{run_id}/09_review/review_report.md
-artifacts/{project_id}/{run_id}/09_review/review_report.html
+artifacts/{project_id}/{run_id}/09_review_report/review_report.md
+artifacts/{project_id}/{run_id}/09_review_report/review_report_metadata.json
 ```
 
 ### Optional runtime skill
@@ -938,6 +933,8 @@ skills/review_summary_writer_v1.json
 - inferred assumptions,
 - rejected tests,
 - approval-needed items.
+
+C13 must not re-run C12 cross-artifact validation, recalculate coverage, or change validation state.
 
 ### Must not own
 
@@ -1083,7 +1080,7 @@ The following runtime skills are expected as the product matures.
 | Test obligations | `06_test_obligations/test_obligation_ledger.json` |
 | Draft tests | `07_draft_tests/draft_test_suite.json` |
 | Validated tests and coverage | `08_validated_tests/validated_test_suite.json`, `08_validated_tests/coverage_report.json` |
-| Review | `09_review/review_report.json` |
+| Review | `09_review_report/review_report.md`, `09_review_report/review_report_metadata.json` |
 | Executor export | `10_executor_export/executor_export_package.json` |
 | Skill runs | `skill_runs/{skill_run_id}.json` |
 

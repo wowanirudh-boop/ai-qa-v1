@@ -63,6 +63,8 @@ None.
 ## Validation rules
 
 - Referenced artifacts must exist.
+- C13 consumes already-validated artifacts and does not re-run full C12 cross-artifact validation.
+- C13 reports traceability and coverage status from upstream artifacts.
 - Report generation must not change validation state.
 - Report content should be deterministic for golden tests.
 
@@ -85,6 +87,7 @@ Must not implement:
 
 - validation state changes
 - coverage calculation
+- full test link validation owned by C12
 - executor export
 - runtime skill calls
 
@@ -92,4 +95,3 @@ Must not implement:
 
 - Review report and metadata are generated from existing artifacts.
 - Tests prove deterministic output and no mutation of input state.
-

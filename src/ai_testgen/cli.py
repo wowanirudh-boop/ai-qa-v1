@@ -19,6 +19,7 @@ from ai_testgen.requirement_governance import (
     RequirementGovernanceError,
     govern_requirements_from_atomic_ledger_artifact,
 )
+from ai_testgen.review_report import ReviewReportError, generate_review_report_from_validated_suite_artifact
 from ai_testgen.obligation_planning import (
     TestObligationPlanningError,
     plan_obligations_from_governed_ledger_artifact,
@@ -82,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     validate_tests_parser.add_argument("--draft-suite", required=True, type=Path)
     validate_tests_parser.set_defaults(func=_validate_tests)
 
+    review_report_parser = subcommands.add_parser("review-report")
+    review_report_parser.add_argument("--validated-suite", required=True, type=Path)
+    review_report_parser.set_defaults(func=_review_report)
+
     return parser
 
 
@@ -101,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         TestObligationPlanningError,
         TestGenerationError,
         TestValidationError,
+        ReviewReportError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -163,6 +169,13 @@ def _validate_tests(args: argparse.Namespace) -> int:
     result = validate_tests_from_draft_suite_artifact(args.draft_suite)
     print(f"Validated tests saved to {result.validated_suite_path}")
     print(f"Coverage report saved to {result.coverage_report_path}")
+    return 0
+
+
+def _review_report(args: argparse.Namespace) -> int:
+    result = generate_review_report_from_validated_suite_artifact(args.validated_suite)
+    print(f"Review report saved to {result.report_path}")
+    print(f"Review report metadata saved to {result.metadata_path}")
     return 0
 
 
