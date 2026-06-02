@@ -157,7 +157,10 @@ def extract_requirements_from_source_package_artifact(
         raw_candidate_packages.append(raw_candidate_package)
         skill_run_records.append(skill_run_record)
 
-    candidate_package = _merge_candidate_packages_with_deterministic_ids(raw_candidate_packages)
+    candidate_package = _merge_candidate_packages_with_deterministic_ids(
+        raw_candidate_packages,
+        skill_run_ids=[record.skill_run_id for record in skill_run_records],
+    )
     validate_candidate_package_against_source(candidate_package, source_package)
     final_candidate_artifact = _write_candidate_package(
         store,
@@ -393,6 +396,8 @@ def _source_package_with_chunks(source_package: SourcePackage, chunks: list[Sour
 
 def _merge_candidate_packages_with_deterministic_ids(
     candidate_packages: list[CandidateRequirementPackage],
+    *,
+    skill_run_ids: list[str] | None = None,
 ) -> CandidateRequirementPackage:
     if not candidate_packages:
         raise InvalidCandidateRequirementPackageError("No CandidateRequirementPackage outputs to merge")
@@ -440,6 +445,8 @@ def _merge_candidate_packages_with_deterministic_ids(
 
     if chunk_extraction_results:
         data["chunk_extraction_results"] = chunk_extraction_results
+    if skill_run_ids is not None:
+        data["skill_run_ids"] = skill_run_ids
 
     try:
         return CandidateRequirementPackage.from_dict(data)

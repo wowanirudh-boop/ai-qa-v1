@@ -101,12 +101,14 @@ def stable_json(data: dict) -> str:
 
 
 class FakeRequirementAtomizationAdapter:
-    def __init__(self, output: dict) -> None:
+    def __init__(self, output) -> None:
         self.output = output
         self.calls = []
 
     def execute(self, skill_definition, input_artifacts):
         self.calls.append((skill_definition, input_artifacts))
+        if callable(self.output):
+            return self.output(skill_definition, input_artifacts, len(self.calls))
         return self.output
 
 
@@ -144,7 +146,7 @@ def write_project_config(store: ArtifactStore, *, metadata: dict | None = None):
     )
 
 
-def runtime_with_adapter(artifact_root: Path, output: dict) -> tuple[SkillRuntime, FakeRequirementAtomizationAdapter]:
+def runtime_with_adapter(artifact_root: Path, output) -> tuple[SkillRuntime, FakeRequirementAtomizationAdapter]:
     adapter = FakeRequirementAtomizationAdapter(output)
     return SkillRuntime(artifact_root=artifact_root, adapter=adapter), adapter
 
@@ -187,10 +189,11 @@ def test_production_atomization_uses_skill_runtime_when_no_skill_definition_is_s
         / "04_atomic_requirements"
         / "atomic_requirement_ledger.json"
     )
-    expected_ledger = atomic_ledger_data()
+    expected_ledger = atomic_ledger_data(skill_run_ids=["skill_run_001"])
     assert result.atomic_ledger_path == expected_atomic_path
     assert result.atomic_ledger.to_dict() == expected_ledger
     assert result.skill_run_record.skill_id == "fake_requirement_atomization_v1"
+    assert result.atomic_ledger.skill_run_ids == ["skill_run_001"]
     assert result.skill_run_record_path == (
         artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json"
     )
@@ -219,7 +222,7 @@ def test_requirement_atomization_uses_project_configured_codex_cli_adapter(tmp_p
 
     result = atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
 
-    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data(skill_run_ids=["skill_run_001"])
     assert len(calls) == 1
     assert isinstance(calls[0][1][0], CandidateRequirementPackage)
 
@@ -245,8 +248,73 @@ def test_requirement_atomization_can_use_explicit_codex_cli_adapter(tmp_path, mo
         skill_adapter=CODEX_CLI_ADAPTER_NAME,
     )
 
-    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data(skill_run_ids=["skill_run_001"])
     assert len(calls) == 1
+
+
+def test_requirement_atomization_batches_candidates_and_records_all_skill_runs(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(
+        store,
+        data=candidate_package_data(
+            candidates=[
+                candidate_requirement(),
+                candidate_requirement(
+                    candidate_id="cand_002",
+                    statement="The bot must provide shipment status.",
+                    source_refs=[source_ref(chunk_id="chunk_002")],
+                ),
+                candidate_requirement(
+                    candidate_id="cand_003",
+                    statement="The bot must offer agent handoff.",
+                    source_refs=[source_ref(chunk_id="chunk_003")],
+                ),
+            ]
+        ),
+    )
+
+    def output_for_batch(_definition, input_artifacts, call_number):
+        requirements = []
+        for index, candidate in enumerate(input_artifacts[0].candidates, start=1):
+            requirements.append(
+                atomic_requirement(
+                    requirement_id=f"skill_req_{call_number}_{index}",
+                    statement=candidate.statement,
+                    source_refs=[source_ref.to_dict() for source_ref in candidate.source_refs],
+                    candidate_ids=[candidate.candidate_id],
+                )
+            )
+        return atomic_ledger_data(requirements=requirements)
+
+    runtime, adapter = runtime_with_adapter(artifact_root, output_for_batch)
+
+    result = atomize_requirements_from_candidate_package_artifact(
+        candidate_artifact.path,
+        requirement_atomization_skill_definition(),
+        skill_runtime=runtime,
+        max_candidates_per_skill_run=2,
+    )
+
+    assert [[candidate.candidate_id for candidate in call[1][0].candidates] for call in adapter.calls] == [
+        ["cand_001", "cand_002"],
+        ["cand_003"],
+    ]
+    assert [record.skill_run_id for record in result.skill_run_records] == [
+        "skill_run_001",
+        "skill_run_002",
+    ]
+    assert result.atomic_ledger.skill_run_ids == ["skill_run_001", "skill_run_002"]
+    assert [requirement.requirement_id for requirement in result.atomic_ledger.requirements] == [
+        "req_001",
+        "req_002",
+        "req_003",
+    ]
+    assert [requirement.candidate_ids for requirement in result.atomic_ledger.requirements] == [
+        ["cand_001"],
+        ["cand_002"],
+        ["cand_003"],
+    ]
 
 
 def test_requirement_atomization_without_adapter_fails_clearly(tmp_path, monkeypatch):
@@ -632,6 +700,7 @@ def test_skill_atomization_writes_documented_outputs_and_raw_skill_output(tmp_pa
         "demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json",
         "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger.json",
         "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger_skill_output.json",
+        "demo_chatbot/run_001/04_atomic_requirements/candidate_requirement_package_atomization_input.json",
         "demo_chatbot/run_001/skill_runs/skill_run_001.json",
     ]
 
@@ -662,8 +731,8 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
     atomic_path = tmp_path / "atomic_requirement_ledger.json"
     calls = []
 
-    def fake_atomize(candidates, skill_definition=None, *, skill_adapter=None):
-        calls.append((candidates, skill_definition, skill_adapter))
+    def fake_atomize(candidates, skill_definition=None, *, skill_adapter=None, max_candidates_per_skill_run=5):
+        calls.append((candidates, skill_definition, skill_adapter, max_candidates_per_skill_run))
         return SimpleNamespace(atomic_ledger_path=atomic_path)
 
     monkeypatch.setattr(cli, "atomize_requirements_from_candidate_package_artifact", fake_atomize)
@@ -677,6 +746,8 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
             str(skill_definition_path),
             "--skill-adapter",
             CODEX_CLI_ADAPTER_NAME,
+            "--max-candidates-per-skill-run",
+            "2",
         ]
     )
 
@@ -684,7 +755,7 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
     assert exit_code == 0
     assert str(atomic_path) in captured.out
     assert captured.err == ""
-    assert calls == [(candidate_path, skill_definition_path, CODEX_CLI_ADAPTER_NAME)]
+    assert calls == [(candidate_path, skill_definition_path, CODEX_CLI_ADAPTER_NAME, 2)]
 
 
 def test_cli_atomize_requirements_reports_invalid_candidate_artifact(tmp_path, capsys):
@@ -725,6 +796,7 @@ def test_c08_writes_no_future_component_artifacts(tmp_path, monkeypatch):
         "demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json",
         "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger.json",
         "demo_chatbot/run_001/04_atomic_requirements/atomic_requirement_ledger_skill_output.json",
+        "demo_chatbot/run_001/04_atomic_requirements/candidate_requirement_package_atomization_input.json",
         "demo_chatbot/run_001/skill_runs/skill_run_001.json",
     ]
 
@@ -761,7 +833,7 @@ def test_production_public_function_does_not_call_deterministic_helper(tmp_path,
         skill_runtime=runtime,
     )
 
-    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data(skill_run_ids=["skill_run_001"])
 
 
 def test_c08_implementation_has_no_future_component_or_provider_dependencies():

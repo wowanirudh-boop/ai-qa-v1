@@ -90,12 +90,16 @@ class FakeSkillAdapter:
     def __init__(self, output: dict | Exception) -> None:
         self.output = output
         self.calls = []
+        self.metadata = {"adapter_name": "test_fake", "adapter_mode": "unit_test"}
 
     def execute(self, skill_definition, input_artifacts):
         self.calls.append((skill_definition, input_artifacts))
         if isinstance(self.output, Exception):
             raise self.output
         return self.output
+
+    def skill_run_metadata(self):
+        return dict(self.metadata)
 
 
 def write_source_package(store: ArtifactStore, *, data: dict | None = None):
@@ -183,6 +187,7 @@ def test_fake_skill_execution_validates_io_writes_output_and_records_success(tmp
     )
 
     expected_record = json.loads((GOLDEN_DIR / "succeeded_skill_run_record.json").read_text(encoding="utf-8"))
+    expected_record["metadata"] = {"adapter_name": "test_fake", "adapter_mode": "unit_test"}
     assert record.to_dict() == expected_record
     assert len(adapter.calls) == 1
     assert isinstance(adapter.calls[0][1][0], SourcePackage)
@@ -266,6 +271,7 @@ def test_failed_fake_skill_records_error_without_writing_output(tmp_path):
     record = SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8")))
     assert record.status == "failed"
     assert "fake failure" in record.error
+    assert record.metadata == {"adapter_name": "test_fake", "adapter_mode": "unit_test"}
     assert record.input_artifact_paths == [
         "artifacts/demo_chatbot/run_001/02_source_package/source_package.json"
     ]
@@ -387,6 +393,13 @@ def test_codex_cli_schema_invalid_output_is_recorded_by_c06(tmp_path):
     )
     assert record.status == "failed"
     assert "CandidateRequirementPackage" in record.error
+    assert record.metadata == {
+        "adapter_name": "codex_cli",
+        "adapter_mode": "cli",
+        "adapter_command": "codex",
+        "exit_code": 0,
+        "timeout_seconds": 300,
+    }
     assert not output_path.exists()
 
 
@@ -422,10 +435,56 @@ def test_codex_cli_successful_output_is_validated_written_and_recorded(tmp_path)
     )
 
     assert record.status == "succeeded"
+    assert record.metadata == {
+        "adapter_name": "codex_cli",
+        "adapter_mode": "cli",
+        "adapter_command": "codex",
+        "exit_code": 0,
+        "timeout_seconds": 300,
+    }
     assert len(calls) == 1
     assert CandidateRequirementPackage.from_dict(json.loads(output_path.read_text(encoding="utf-8")))
     run_record_path = artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json"
     assert SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8"))) == record
+
+
+def test_codex_cli_nonzero_exit_metadata_is_recorded_by_c06(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    input_artifact = write_source_package(store)
+    output_path = (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    )
+
+    def runner(_args, _prompt, _timeout, _cwd):
+        return SimpleNamespace(returncode=7, stdout="", stderr="codex failed")
+
+    definition = load_skill_definition(GOLDEN_DIR / "fake_skill_definition.json")
+    runtime = SkillRuntime(artifact_root=artifact_root, adapter=CodexCliSkillAdapter(command="codex", runner=runner))
+
+    with pytest.raises(SkillExecutionError, match="exit code 7"):
+        runtime.run_skill(
+            definition,
+            input_artifact_paths=[input_artifact.path],
+            output_artifact_paths=[output_path],
+            skill_run_id="skill_run_001",
+        )
+
+    record = SkillRunRecord.from_dict(
+        json.loads((artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json").read_text())
+    )
+    assert record.status == "failed"
+    assert record.metadata == {
+        "adapter_name": "codex_cli",
+        "adapter_mode": "cli",
+        "adapter_command": "codex",
+        "exit_code": 7,
+        "timeout_seconds": 300,
+    }
 
 
 def test_run_skill_records_unknown_contract_failure_when_artifact_context_is_valid(tmp_path):

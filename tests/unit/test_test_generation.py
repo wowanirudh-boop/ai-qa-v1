@@ -614,8 +614,17 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
         oracle_generator_skill_definition=None,
         *,
         skill_adapter=None,
+        max_obligations_per_skill_run=1,
     ):
-        calls.append((obligations, test_case_writer_skill_definition, oracle_generator_skill_definition, skill_adapter))
+        calls.append(
+            (
+                obligations,
+                test_case_writer_skill_definition,
+                oracle_generator_skill_definition,
+                skill_adapter,
+                max_obligations_per_skill_run,
+            )
+        )
         return SimpleNamespace(draft_suite_path=draft_path)
 
     monkeypatch.setattr(cli, "generate_tests_from_obligation_ledger_artifact", fake_generate_tests)
@@ -631,6 +640,8 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
             str(oracle_skill_definition_path),
             "--skill-adapter",
             CODEX_CLI_ADAPTER_NAME,
+            "--max-obligations-per-skill-run",
+            "20",
         ]
     )
 
@@ -639,7 +650,13 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
     assert str(draft_path) in captured.out
     assert captured.err == ""
     assert calls == [
-        (obligations_path, writer_skill_definition_path, oracle_skill_definition_path, CODEX_CLI_ADAPTER_NAME)
+        (
+            obligations_path,
+            writer_skill_definition_path,
+            oracle_skill_definition_path,
+            CODEX_CLI_ADAPTER_NAME,
+            20,
+        )
     ]
 
 

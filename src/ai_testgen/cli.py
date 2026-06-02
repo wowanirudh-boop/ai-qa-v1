@@ -13,6 +13,7 @@ from ai_testgen.requirement_extraction import (
     extract_requirements_from_source_package_artifact,
 )
 from ai_testgen.requirement_atomization import (
+    DEFAULT_MAX_CANDIDATES_PER_SKILL_RUN,
     RequirementAtomizationError,
     atomize_requirements_from_candidate_package_artifact,
 )
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     atomize_parser.add_argument("--candidates", required=True, type=Path)
     atomize_parser.add_argument("--skill-definition", type=Path)
     atomize_parser.add_argument("--skill-adapter")
+    atomize_parser.add_argument("--max-candidates-per-skill-run", type=int, default=DEFAULT_MAX_CANDIDATES_PER_SKILL_RUN)
     atomize_parser.set_defaults(func=_atomize_requirements)
 
     govern_parser = subcommands.add_parser("govern-requirements")
@@ -82,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_tests_parser.add_argument("--skill-definition", type=Path, default=DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH)
     generate_tests_parser.add_argument("--oracle-skill-definition", type=Path, default=DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH)
     generate_tests_parser.add_argument("--skill-adapter")
+    generate_tests_parser.add_argument("--max-obligations-per-skill-run", type=int, default=1)
     generate_tests_parser.set_defaults(func=_generate_tests)
 
     validate_tests_parser = subcommands.add_parser("validate-tests")
@@ -169,6 +172,7 @@ def _atomize_requirements(args: argparse.Namespace) -> int:
         args.candidates,
         args.skill_definition,
         skill_adapter=args.skill_adapter,
+        max_candidates_per_skill_run=args.max_candidates_per_skill_run,
     )
     print(f"Atomized requirements saved to {result.atomic_ledger_path}")
     return 0
@@ -192,6 +196,7 @@ def _generate_tests(args: argparse.Namespace) -> int:
         args.skill_definition,
         args.oracle_skill_definition,
         skill_adapter=args.skill_adapter,
+        max_obligations_per_skill_run=args.max_obligations_per_skill_run,
     )
     print(f"Generated draft tests saved to {result.draft_suite_path}")
     return 0

@@ -34,10 +34,12 @@ CANDIDATE_REQUIREMENT_PACKAGE_ARTIFACT_NAME = "candidate_requirement_package"
 ATOMIC_REQUIREMENTS_STAGE = "04_atomic_requirements"
 ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME = "atomic_requirement_ledger"
 RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME = "atomic_requirement_ledger_skill_output"
+REQUIREMENT_ATOMIZATION_INPUT_ARTIFACT_NAME = "candidate_requirement_package_atomization_input"
 DEFAULT_SKILL_DEFINITION_PATH = Path("skills") / "requirement_atomization_v1.json"
 REQUIREMENT_ATOMIZATION_INPUT_CONTRACT = "CandidateRequirementPackage"
 REQUIREMENT_ATOMIZATION_OUTPUT_CONTRACT = "AtomicRequirementLedger"
 ATOMIC_LEDGER_ID = "atomic_ledger_001"
+DEFAULT_MAX_CANDIDATES_PER_SKILL_RUN = 5
 SAFE_AND_SPLIT_VERBS = {
     "accept",
     "allow",
@@ -120,6 +122,8 @@ class RequirementAtomizationResult:
     atomic_ledger_path: Path
     skill_run_record: SkillRunRecord
     skill_run_record_path: Path
+    skill_run_records: list[SkillRunRecord]
+    skill_run_record_paths: list[Path]
 
 
 def atomize_requirements_from_candidate_package_artifact(
@@ -129,7 +133,11 @@ def atomize_requirements_from_candidate_package_artifact(
     skill_runtime: SkillRuntime | None = None,
     skill_adapter: str | None = None,
     skill_run_id: str | None = None,
+    max_candidates_per_skill_run: int = DEFAULT_MAX_CANDIDATES_PER_SKILL_RUN,
 ) -> RequirementAtomizationResult:
+    if type(max_candidates_per_skill_run) is not int or max_candidates_per_skill_run < 1:
+        raise CandidatePackageArtifactError("max_candidates_per_skill_run must be a positive integer")
+
     candidate_path = Path(candidate_package_path)
     artifact_root, project_id, run_id = _artifact_context_from_candidate_package_path(candidate_path)
     store = ArtifactStore(artifact_root)
@@ -140,9 +148,8 @@ def atomize_requirements_from_candidate_package_artifact(
             f"{candidate_package.project_id}: {candidate_path}"
         )
 
-    atomic_ledger, skill_run_record = _atomize_with_skill(
+    atomic_ledger, skill_run_records = _atomize_with_skill(
         store,
-        candidate_path=candidate_path,
         candidate_package=candidate_package,
         project_id=project_id,
         run_id=run_id,
@@ -150,14 +157,21 @@ def atomize_requirements_from_candidate_package_artifact(
         skill_runtime=skill_runtime,
         skill_adapter=skill_adapter,
         skill_run_id=skill_run_id,
+        max_candidates_per_skill_run=max_candidates_per_skill_run,
     )
     written = _write_atomic_ledger(store, run_id=run_id, atomic_ledger=atomic_ledger)
+    skill_run_record_paths = [
+        store.artifact_path(project_id, run_id, "skill_runs", record.skill_run_id)
+        for record in skill_run_records
+    ]
 
     return RequirementAtomizationResult(
         atomic_ledger=atomic_ledger,
         atomic_ledger_path=written.path,
-        skill_run_record=skill_run_record,
-        skill_run_record_path=store.artifact_path(project_id, run_id, "skill_runs", skill_run_record.skill_run_id),
+        skill_run_record=skill_run_records[0],
+        skill_run_record_path=skill_run_record_paths[0],
+        skill_run_records=skill_run_records,
+        skill_run_record_paths=skill_run_record_paths,
     )
 
 
@@ -215,7 +229,6 @@ def validate_atomic_ledger_against_candidates(
 def _atomize_with_skill(
     store: ArtifactStore,
     *,
-    candidate_path: Path,
     candidate_package: CandidateRequirementPackage,
     project_id: str,
     run_id: str,
@@ -223,16 +236,12 @@ def _atomize_with_skill(
     skill_runtime: SkillRuntime | None,
     skill_adapter: str | None,
     skill_run_id: str | None,
-) -> tuple[AtomicRequirementLedger, SkillRunRecord]:
+    max_candidates_per_skill_run: int,
+) -> tuple[AtomicRequirementLedger, list[SkillRunRecord]]:
     definition = _load_requirement_atomization_skill_definition(skill_definition)
-    raw_atomic_path, raw_atomic_version = _next_artifact_path(
-        store,
-        project_id,
-        run_id,
-        ATOMIC_REQUIREMENTS_STAGE,
-        RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME,
-    )
-    run_id_for_skill = skill_run_id or _next_skill_run_id(store, project_id, run_id)
+    batches = _candidate_batches(candidate_package.candidates, max_candidates_per_skill_run)
+    raw_atomic_ledgers: list[AtomicRequirementLedger] = []
+    skill_run_records: list[SkillRunRecord] = []
 
     try:
         runtime = skill_runtime or create_skill_runtime_for_run(
@@ -241,24 +250,59 @@ def _atomize_with_skill(
             run_id=run_id,
             adapter_name=skill_adapter,
         )
-        skill_run_record = runtime.run_skill(
-            definition,
-            input_artifact_paths=[candidate_path],
-            output_artifact_paths=[raw_atomic_path],
-            skill_run_id=run_id_for_skill,
-        )
     except SkillRuntimeError as exc:
         raise RequirementAtomizationSkillError(f"Requirement atomization skill failed: {exc}") from exc
 
-    raw_atomic_ledger = _load_atomic_ledger(
-        store,
-        project_id=project_id,
-        run_id=run_id,
-        artifact_name=RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME,
-        version=raw_atomic_version,
+    for batch_index, batch in enumerate(batches, start=1):
+        bounded_candidate_package = _candidate_package_with_candidates(candidate_package, batch)
+        bounded_artifact = _write_atomization_input_candidate_package(
+            store,
+            run_id=run_id,
+            candidate_package=bounded_candidate_package,
+        )
+        raw_atomic_path, raw_atomic_version = _next_artifact_path(
+            store,
+            project_id,
+            run_id,
+            ATOMIC_REQUIREMENTS_STAGE,
+            RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME,
+        )
+        run_id_for_skill = _skill_run_id_for_batch(
+            store,
+            project_id,
+            run_id,
+            skill_run_id,
+            batch_index,
+            len(batches),
+        )
+
+        try:
+            skill_run_record = runtime.run_skill(
+                definition,
+                input_artifact_paths=[bounded_artifact.path],
+                output_artifact_paths=[raw_atomic_path],
+                skill_run_id=run_id_for_skill,
+            )
+        except SkillRuntimeError as exc:
+            raise RequirementAtomizationSkillError(f"Requirement atomization skill failed: {exc}") from exc
+
+        raw_atomic_ledger = _load_atomic_ledger(
+            store,
+            project_id=project_id,
+            run_id=run_id,
+            artifact_name=RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME,
+            version=raw_atomic_version,
+        )
+        validate_atomic_ledger_against_candidates(raw_atomic_ledger, bounded_candidate_package)
+        raw_atomic_ledgers.append(raw_atomic_ledger)
+        skill_run_records.append(skill_run_record)
+
+    atomic_ledger = _merge_atomic_ledgers_with_deterministic_ids(
+        raw_atomic_ledgers,
+        skill_run_ids=[record.skill_run_id for record in skill_run_records],
     )
-    validate_atomic_ledger_against_candidates(raw_atomic_ledger, candidate_package)
-    return _atomic_ledger_with_deterministic_ids(raw_atomic_ledger), skill_run_record
+    validate_atomic_ledger_against_candidates(atomic_ledger, candidate_package)
+    return atomic_ledger, skill_run_records
 
 
 def _atomic_requirement_from_candidate(
@@ -410,6 +454,26 @@ def _load_candidate_package(
         raise CandidatePackageArtifactError(f"Failed to load CandidateRequirementPackage artifact: {exc}") from exc
 
 
+def _write_atomization_input_candidate_package(
+    store: ArtifactStore,
+    *,
+    run_id: str,
+    candidate_package: CandidateRequirementPackage,
+):
+    try:
+        return store.write_json(
+            candidate_package.project_id,
+            run_id,
+            ATOMIC_REQUIREMENTS_STAGE,
+            REQUIREMENT_ATOMIZATION_INPUT_ARTIFACT_NAME,
+            candidate_package,
+        )
+    except ArtifactStoreError as exc:
+        raise RequirementAtomizationPersistenceError(
+            f"Failed to save CandidateRequirementPackage atomization input artifact: {exc}"
+        ) from exc
+
+
 def _load_atomic_ledger(
     store: ArtifactStore,
     *,
@@ -468,6 +532,73 @@ def _atomic_ledger_with_deterministic_ids(
         ) from exc
 
 
+def _merge_atomic_ledgers_with_deterministic_ids(
+    atomic_ledgers: list[AtomicRequirementLedger],
+    *,
+    skill_run_ids: list[str],
+) -> AtomicRequirementLedger:
+    if not atomic_ledgers:
+        raise InvalidAtomicRequirementLedgerError("No AtomicRequirementLedger outputs to merge")
+
+    project_id = atomic_ledgers[0].project_id
+    candidate_package_id = atomic_ledgers[0].candidate_package_id
+    requirements: list[dict] = []
+    next_requirement_id = count(1)
+    for ledger in atomic_ledgers:
+        if ledger.project_id != project_id:
+            raise InvalidAtomicRequirementLedgerError("AtomicRequirementLedger project_id values must match")
+        if ledger.candidate_package_id != candidate_package_id:
+            raise InvalidAtomicRequirementLedgerError("AtomicRequirementLedger candidate_package_id values must match")
+        for requirement in ledger.requirements:
+            requirement_data = requirement.to_dict()
+            requirement_data["requirement_id"] = f"req_{next(next_requirement_id):03d}"
+            requirements.append(requirement_data)
+
+    try:
+        return AtomicRequirementLedger.from_dict(
+            {
+                "atomic_ledger_id": ATOMIC_LEDGER_ID,
+                "project_id": project_id,
+                "candidate_package_id": candidate_package_id,
+                "requirements": requirements,
+                "skill_run_ids": skill_run_ids,
+            }
+        )
+    except SchemaValidationError as exc:
+        raise InvalidAtomicRequirementLedgerError(
+            f"Invalid deterministic AtomicRequirementLedger data: {exc}"
+        ) from exc
+
+
+def _candidate_package_with_candidates(
+    candidate_package: CandidateRequirementPackage,
+    candidates: list[CandidateRequirement],
+) -> CandidateRequirementPackage:
+    candidate_ids = {candidate.candidate_id for candidate in candidates}
+    data = candidate_package.to_dict()
+    data["candidates"] = [candidate.to_dict() for candidate in candidates]
+    if "chunk_extraction_results" in data:
+        chunk_extraction_results = []
+        for chunk_result in data["chunk_extraction_results"]:
+            candidate_ids_for_chunk = [
+                candidate_id
+                for candidate_id in chunk_result["candidate_ids"]
+                if candidate_id in candidate_ids
+            ]
+            if candidate_ids_for_chunk:
+                rewritten = dict(chunk_result)
+                rewritten["candidate_ids"] = candidate_ids_for_chunk
+                chunk_extraction_results.append(rewritten)
+        if chunk_extraction_results:
+            data["chunk_extraction_results"] = chunk_extraction_results
+        else:
+            data.pop("chunk_extraction_results", None)
+    try:
+        return CandidateRequirementPackage.from_dict(data)
+    except SchemaValidationError as exc:
+        raise CandidatePackageArtifactError(f"Invalid bounded CandidateRequirementPackage data: {exc}") from exc
+
+
 def _artifact_context_from_candidate_package_path(path: Path) -> tuple[Path, str, str]:
     if path.name != "candidate_requirement_package.json":
         raise CandidatePackageArtifactError(
@@ -501,3 +632,28 @@ def _next_skill_run_id(store: ArtifactStore, project_id: str, run_id: str) -> st
         if not store.exists(project_id, run_id, "skill_runs", skill_run_id):
             return skill_run_id
     raise AssertionError("unreachable")
+
+
+def _skill_run_id_for_batch(
+    store: ArtifactStore,
+    project_id: str,
+    run_id: str,
+    requested_skill_run_id: str | None,
+    batch_index: int,
+    batch_count: int,
+) -> str:
+    if requested_skill_run_id is None:
+        return _next_skill_run_id(store, project_id, run_id)
+    if batch_count == 1:
+        return requested_skill_run_id
+    return f"{requested_skill_run_id}_{batch_index:03d}"
+
+
+def _candidate_batches(
+    candidates: list[CandidateRequirement],
+    batch_size: int,
+) -> list[list[CandidateRequirement]]:
+    return [
+        candidates[index:index + batch_size]
+        for index in range(0, len(candidates), batch_size)
+    ]

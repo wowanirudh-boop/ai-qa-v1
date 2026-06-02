@@ -42,6 +42,7 @@ class CodexCliSkillAdapter:
         self.command = str(command or os.environ.get(CODEX_CLI_COMMAND_ENV) or DEFAULT_CODEX_CLI_COMMAND)
         self.runner = runner or _run_codex_cli
         self.cwd = Path(cwd) if cwd is not None else None
+        self._last_metadata: dict[str, Any] = _base_metadata(self.command, None)
 
     def execute(
         self,
@@ -50,6 +51,7 @@ class CodexCliSkillAdapter:
     ) -> Mapping[str, Any] | SchemaModel | list[Mapping[str, Any] | SchemaModel]:
         prompt = _build_prompt(skill_definition, input_artifacts)
         timeout_seconds = skill_definition.timeout_seconds or DEFAULT_CODEX_CLI_TIMEOUT_SECONDS
+        self._last_metadata = _base_metadata(self.command, timeout_seconds)
         with tempfile.TemporaryDirectory(prefix="ai-testgen-codex-") as temp_dir:
             temp_path = Path(temp_dir)
             output_path = temp_path / "last_message.json"
@@ -73,11 +75,15 @@ class CodexCliSkillAdapter:
                 )
                 args[5:5] = ["--output-schema", str(schema_path)]
             result = self._run(args, prompt, timeout_seconds)
+            self._last_metadata["exit_code"] = result.returncode
             if result.returncode != 0:
                 details = (result.stderr or result.stdout).strip()
                 raise SkillExecutionError(f"Codex CLI failed with exit code {result.returncode}: {details}")
             output_text = output_path.read_text(encoding="utf-8") if output_path.exists() else result.stdout
         return _parse_json_output(output_text)
+
+    def skill_run_metadata(self) -> Mapping[str, Any]:
+        return dict(self._last_metadata)
 
     def _run(self, args: Sequence[str], prompt: str, timeout_seconds: int) -> CodexCliCompletedProcess:
         try:
@@ -90,6 +96,19 @@ class CodexCliSkillAdapter:
             raise SkillExecutionError(f"Codex CLI timed out after {timeout_seconds} seconds") from exc
         except OSError as exc:
             raise SkillExecutionError(f"Codex CLI execution failed: {exc}") from exc
+
+
+def _base_metadata(command: str, timeout_seconds: int | None) -> dict[str, Any]:
+    return {
+        "adapter_name": CODEX_CLI_ADAPTER_NAME,
+        "adapter_mode": "cli",
+        "adapter_command": _safe_command_identifier(command),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
+def _safe_command_identifier(command: str) -> str:
+    return Path(command).name or command
 
 
 def _run_codex_cli(

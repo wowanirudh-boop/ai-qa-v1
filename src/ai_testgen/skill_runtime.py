@@ -49,6 +49,9 @@ class SkillExecutionAdapter(Protocol):
     ) -> Mapping[str, Any] | SchemaModel | list[Mapping[str, Any] | SchemaModel]:
         """Execute a runtime skill and return output artifact data."""
 
+    def skill_run_metadata(self) -> Mapping[str, Any] | None:
+        """Return safe adapter metadata to attach to SkillRunRecord artifacts."""
+
 
 @dataclass(frozen=True)
 class ArtifactPathContext:
@@ -106,15 +109,17 @@ class SkillRuntime:
             for context, output in zip(output_contexts, outputs):
                 self._write_model(context, output)
 
-            record = SkillRunRecord.from_dict(
-                {
-                    "skill_run_id": skill_run_id,
-                    "skill_id": skill_id,
-                    "status": SkillRunStatus.SUCCEEDED.value,
-                    "input_artifact_paths": input_paths,
-                    "output_artifact_paths": output_paths,
-                }
-            )
+            record_data: dict[str, Any] = {
+                "skill_run_id": skill_run_id,
+                "skill_id": skill_id,
+                "status": SkillRunStatus.SUCCEEDED.value,
+                "input_artifact_paths": input_paths,
+                "output_artifact_paths": output_paths,
+            }
+            metadata = _adapter_metadata(self.adapter)
+            if metadata is not None:
+                record_data["metadata"] = metadata
+            record = SkillRunRecord.from_dict(record_data)
             self._write_run_record(run_context, record)
             return record
         except Exception as exc:
@@ -122,16 +127,18 @@ class SkillRuntime:
                 error = str(exc)
             else:
                 error = str(exc) or exc.__class__.__name__
-            record = SkillRunRecord.from_dict(
-                {
-                    "skill_run_id": skill_run_id,
-                    "skill_id": skill_id,
-                    "status": SkillRunStatus.FAILED.value,
-                    "input_artifact_paths": input_paths,
-                    "output_artifact_paths": output_paths,
-                    "error": error,
-                }
-            )
+            record_data = {
+                "skill_run_id": skill_run_id,
+                "skill_id": skill_id,
+                "status": SkillRunStatus.FAILED.value,
+                "input_artifact_paths": input_paths,
+                "output_artifact_paths": output_paths,
+                "error": error,
+            }
+            metadata = _adapter_metadata(self.adapter)
+            if metadata is not None:
+                record_data["metadata"] = metadata
+            record = SkillRunRecord.from_dict(record_data)
             self._write_run_record(run_context, record)
             raise SkillExecutionError(error) from exc
 
@@ -308,6 +315,27 @@ def _normalize_outputs(
     if len(raw_outputs) != expected_count:
         raise SkillExecutionError("Skill adapter output count must match output_artifact_paths")
     return raw_outputs
+
+
+def _adapter_metadata(adapter: SkillExecutionAdapter | None) -> dict[str, Any] | None:
+    if adapter is None:
+        return None
+    metadata_hook = getattr(adapter, "skill_run_metadata", None)
+    if metadata_hook is None:
+        return None
+    if not callable(metadata_hook):
+        raise SkillExecutionError("Skill adapter metadata hook must be callable")
+    metadata = metadata_hook()
+    if metadata is None:
+        return None
+    if not isinstance(metadata, Mapping):
+        raise SkillExecutionError("Skill adapter metadata must be a mapping")
+    cleaned = {
+        key: value
+        for key, value in metadata.items()
+        if value is not None
+    }
+    return cleaned or None
 
 
 def _artifact_name_and_version(file_name: str) -> tuple[str, int]:

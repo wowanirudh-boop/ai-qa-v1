@@ -202,7 +202,7 @@ def test_extract_requirements_happy_path_invokes_skill_runtime_and_writes_artifa
         / "candidate_requirement_package.json"
     )
     assert result.candidate_package_path == expected_candidate_path
-    assert result.candidate_package.to_dict() == candidate_package_data()
+    assert result.candidate_package.to_dict() == candidate_package_data(skill_run_ids=["skill_run_001"])
     assert CandidateRequirementPackage.from_dict(
         json.loads(expected_candidate_path.read_text(encoding="utf-8"))
     ) == result.candidate_package
@@ -509,6 +509,7 @@ def test_multiple_eligible_chunks_produce_multiple_bounded_skill_runs_with_defau
         "skill_run_001",
         "skill_run_002",
     ]
+    assert result.candidate_package.skill_run_ids == ["skill_run_001", "skill_run_002"]
 
 
 def test_batched_chunks_respect_max_chunks_per_skill_run(tmp_path):
@@ -701,6 +702,7 @@ def test_golden_fixture_source_package_to_candidate_package(tmp_path):
     expected_candidate = json.loads(
         (GOLDEN_DIR / "candidate_requirement_package.json").read_text(encoding="utf-8")
     )
+    expected_candidate["skill_run_ids"] = ["skill_run_001"]
     source_artifact = write_source_package(store, data=source_data)
     runtime, _adapter = runtime_with_adapter(artifact_root, expected_candidate)
 
@@ -711,9 +713,7 @@ def test_golden_fixture_source_package_to_candidate_package(tmp_path):
         max_chunks_per_skill_run=2,
     )
 
-    assert stable_json(result.candidate_package.to_dict()) == (
-        GOLDEN_DIR / "candidate_requirement_package.json"
-    ).read_text(encoding="utf-8")
+    assert stable_json(result.candidate_package.to_dict()) == stable_json(expected_candidate)
 
 
 def test_cli_extract_requirements_smoke_delegates_to_c07(tmp_path, monkeypatch, capsys):
