@@ -6,8 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 import ai_testgen.cli as cli
+import ai_testgen.skill_runtime_config as skill_runtime_config
 import ai_testgen.test_generation as test_generation
 from ai_testgen.artifact_store import ArtifactStore
+from ai_testgen.codex_cli_adapter import CODEX_CLI_ADAPTER_NAME
 from ai_testgen.schemas import DraftTestSuite, GovernedRequirementLedger, SkillDefinition, SkillRunRecord
 from ai_testgen.schemas import TestObligationLedger as SchemaTestObligationLedger
 from ai_testgen.skill_runtime import SkillRuntime
@@ -220,6 +222,30 @@ def write_obligation_ledger(store: ArtifactStore, *, data: dict | None = None):
     )
 
 
+def write_project_config(store: ArtifactStore, *, metadata: dict | None = None):
+    return store.write_json(
+        "demo_chatbot",
+        "run_001",
+        "00_project_config",
+        "project_config",
+        {
+            "project_id": "demo_chatbot",
+            "bot_name": "Demo Support Bot",
+            "target_url": "https://example.test/chat",
+            "coverage_policy": {
+                "require_negative_tests": True,
+                "require_positive_tests": True,
+            },
+            "approval_policy": {
+                "allow_export_without_review": False,
+                "require_human_approval_for_inferred": True,
+            },
+            "source_paths": ["requirements.md"],
+            "metadata": metadata or {},
+        },
+    )
+
+
 def runtime_with_adapter(
     artifact_root: Path,
     writer_output: dict,
@@ -274,6 +300,110 @@ def test_generate_tests_happy_path_invokes_skill_runtime_and_writes_artifacts(tm
     assert SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8"))) == (
         result.skill_run_records[0]
     )
+
+
+def test_generate_tests_uses_project_configured_codex_cli_adapter(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store, metadata={"skill_runtime_adapter": CODEX_CLI_ADAPTER_NAME})
+    write_governed_ledger(store)
+    obligation_artifact = write_obligation_ledger(store)
+    writer_skill_path = tmp_path / DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH
+    oracle_skill_path = tmp_path / test_generation.DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH
+    write_skill_definition(writer_skill_path, writer_skill_definition())
+    write_skill_definition(oracle_skill_path, oracle_generator_skill_definition())
+    monkeypatch.setattr(test_generation, "DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH", writer_skill_path)
+    monkeypatch.setattr(test_generation, "DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH", oracle_skill_path)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, skill_definition, input_artifacts):
+            calls.append((skill_definition, input_artifacts))
+            if skill_definition.skill_id.endswith("oracle_generator_v1"):
+                output = input_artifacts[0].to_dict()
+                output["test_cases"][0]["assertions"] = [assertion()]
+                return output
+            return draft_suite_data(test_cases=[draft_test_case_data(assertions=[])])
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    result = generate_tests_from_obligation_ledger_artifact(obligation_artifact.path)
+
+    assert result.draft_suite.to_dict() == expected_draft_suite_data()
+    assert [call[0].skill_id for call in calls] == [
+        "fake_test_case_writer_v1",
+        "fake_oracle_generator_v1",
+    ]
+    assert isinstance(calls[0][1][0], SchemaTestObligationLedger)
+    assert isinstance(calls[1][1][0], DraftTestSuite)
+
+
+def test_generate_tests_can_use_explicit_codex_cli_adapter(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_governed_ledger(store)
+    obligation_artifact = write_obligation_ledger(store)
+    writer_skill_path = tmp_path / DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH
+    oracle_skill_path = tmp_path / test_generation.DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH
+    write_skill_definition(writer_skill_path, writer_skill_definition())
+    write_skill_definition(oracle_skill_path, oracle_generator_skill_definition())
+    monkeypatch.setattr(test_generation, "DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH", writer_skill_path)
+    monkeypatch.setattr(test_generation, "DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH", oracle_skill_path)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, skill_definition, input_artifacts):
+            calls.append((skill_definition, input_artifacts))
+            if skill_definition.skill_id.endswith("oracle_generator_v1"):
+                output = input_artifacts[0].to_dict()
+                output["test_cases"][0]["assertions"] = [assertion()]
+                return output
+            return draft_suite_data(test_cases=[draft_test_case_data(assertions=[])])
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    result = generate_tests_from_obligation_ledger_artifact(
+        obligation_artifact.path,
+        skill_adapter=CODEX_CLI_ADAPTER_NAME,
+    )
+
+    assert result.draft_suite.to_dict() == expected_draft_suite_data()
+    assert len(calls) == 2
+
+
+def test_generate_tests_without_adapter_fails_clearly(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_governed_ledger(store)
+    obligation_artifact = write_obligation_ledger(store)
+    writer_skill_path = tmp_path / DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH
+    oracle_skill_path = tmp_path / test_generation.DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH
+    write_skill_definition(writer_skill_path, writer_skill_definition())
+    write_skill_definition(oracle_skill_path, oracle_generator_skill_definition())
+    monkeypatch.setattr(test_generation, "DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH", writer_skill_path)
+    monkeypatch.setattr(test_generation, "DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH", oracle_skill_path)
+
+    with pytest.raises(C11TestGenerationError, match="requires an execution adapter"):
+        generate_tests_from_obligation_ledger_artifact(obligation_artifact.path)
+
+
+def test_generate_tests_unknown_adapter_fails_clearly(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_governed_ledger(store)
+    obligation_artifact = write_obligation_ledger(store)
+    writer_skill_path = tmp_path / DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH
+    oracle_skill_path = tmp_path / test_generation.DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH
+    write_skill_definition(writer_skill_path, writer_skill_definition())
+    write_skill_definition(oracle_skill_path, oracle_generator_skill_definition())
+    monkeypatch.setattr(test_generation, "DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH", writer_skill_path)
+    monkeypatch.setattr(test_generation, "DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH", oracle_skill_path)
+
+    with pytest.raises(C11TestGenerationError, match="Unknown skill runtime adapter: local_fake"):
+        generate_tests_from_obligation_ledger_artifact(
+            obligation_artifact.path,
+            skill_adapter="local_fake",
+        )
 
 
 def test_missing_requirement_ids_from_skill_output_fails(tmp_path):
@@ -478,8 +608,14 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
     draft_path = tmp_path / "draft_test_suite.json"
     calls = []
 
-    def fake_generate_tests(obligations, test_case_writer_skill_definition=None, oracle_generator_skill_definition=None):
-        calls.append((obligations, test_case_writer_skill_definition, oracle_generator_skill_definition))
+    def fake_generate_tests(
+        obligations,
+        test_case_writer_skill_definition=None,
+        oracle_generator_skill_definition=None,
+        *,
+        skill_adapter=None,
+    ):
+        calls.append((obligations, test_case_writer_skill_definition, oracle_generator_skill_definition, skill_adapter))
         return SimpleNamespace(draft_suite_path=draft_path)
 
     monkeypatch.setattr(cli, "generate_tests_from_obligation_ledger_artifact", fake_generate_tests)
@@ -493,6 +629,8 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
             str(writer_skill_definition_path),
             "--oracle-skill-definition",
             str(oracle_skill_definition_path),
+            "--skill-adapter",
+            CODEX_CLI_ADAPTER_NAME,
         ]
     )
 
@@ -500,7 +638,9 @@ def test_cli_generate_tests_smoke_delegates_to_c11(tmp_path, monkeypatch, capsys
     assert exit_code == 0
     assert str(draft_path) in captured.out
     assert captured.err == ""
-    assert calls == [(obligations_path, writer_skill_definition_path, oracle_skill_definition_path)]
+    assert calls == [
+        (obligations_path, writer_skill_definition_path, oracle_skill_definition_path, CODEX_CLI_ADAPTER_NAME)
+    ]
 
 
 def test_cli_generate_tests_reports_invalid_input(tmp_path, capsys):

@@ -1,11 +1,14 @@
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import ai_testgen.skill_runtime_config as skill_runtime_config
 import ai_testgen.skill_runtime as skill_runtime
 from ai_testgen.artifact_store import ArtifactStore
+from ai_testgen.codex_cli_adapter import CODEX_CLI_ADAPTER_NAME, CodexCliSkillAdapter
 from ai_testgen.schemas import CandidateRequirementPackage, SkillRunRecord, SourcePackage
 from ai_testgen.schemas import SkillDefinition
 from ai_testgen.skill_runtime import (
@@ -66,6 +69,19 @@ def candidate_package_data(**overrides: object) -> dict:
     return data
 
 
+def requirement_extraction_skill_definition(**overrides: object) -> SkillDefinition:
+    data = {
+        "skill_id": "fake_requirement_extraction_v1",
+        "name": "Fake Requirement Extraction",
+        "version": "1.0.0",
+        "input_contract": "SourcePackage",
+        "output_contract": "CandidateRequirementPackage",
+        "entrypoint": "tests.fake_requirement_extraction",
+    }
+    data.update(overrides)
+    return SkillDefinition.from_dict(data)
+
+
 def stable_json(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
@@ -89,6 +105,23 @@ def write_source_package(store: ArtifactStore, *, data: dict | None = None):
         "02_source_package",
         "source_package",
         data or source_package_data(),
+    )
+
+
+def write_project_config(store: ArtifactStore, *, metadata: dict | None = None):
+    return store.write_json(
+        "demo_chatbot",
+        "run_001",
+        "00_project_config",
+        "project_config",
+        {
+            "project_id": "demo_chatbot",
+            "bot_name": "Demo Bot",
+            "target_url": "https://example.test/chat",
+            "coverage_policy": {"require_positive_tests": True},
+            "approval_policy": {"allow_export_without_review": False},
+            "metadata": metadata or {},
+        },
     )
 
 
@@ -239,6 +272,160 @@ def test_failed_fake_skill_records_error_without_writing_output(tmp_path):
     assert record.output_artifact_paths == [
         "artifacts/demo_chatbot/run_001/03_candidate_requirements/candidate_requirement_package.json"
     ]
+
+
+def test_run_skill_without_adapter_fails_clearly_and_records_error(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    input_artifact = write_source_package(store)
+    output_path = (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    )
+    definition = load_skill_definition(GOLDEN_DIR / "fake_skill_definition.json")
+    runtime = SkillRuntime(artifact_root=artifact_root)
+
+    with pytest.raises(SkillExecutionError, match="requires an execution adapter"):
+        runtime.run_skill(
+            definition,
+            input_artifact_paths=[input_artifact.path],
+            output_artifact_paths=[output_path],
+            skill_run_id="skill_run_001",
+        )
+
+    assert not output_path.exists()
+    record = SkillRunRecord.from_dict(
+        json.loads((artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json").read_text())
+    )
+    assert record.status == "failed"
+    assert record.error == "SkillRuntime requires an execution adapter"
+
+
+def test_adapter_resolver_recognizes_codex_cli_from_project_config(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store, metadata={"skill_runtime_adapter": CODEX_CLI_ADAPTER_NAME})
+
+    runtime = skill_runtime_config.create_skill_runtime_for_run(
+        artifact_root=artifact_root,
+        project_id="demo_chatbot",
+        run_id="run_001",
+    )
+
+    assert isinstance(runtime.adapter, CodexCliSkillAdapter)
+
+
+def test_local_fake_adapter_is_not_reachable_from_normal_resolution_paths(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store, metadata={"skill_runtime_adapter": "local_fake"})
+
+    with pytest.raises(skill_runtime_config.SkillRuntimeAdapterConfigurationError, match="local_fake"):
+        skill_runtime_config.create_skill_runtime_for_run(
+            artifact_root=artifact_root,
+            project_id="demo_chatbot",
+            run_id="run_001",
+        )
+
+    with pytest.raises(skill_runtime_config.SkillRuntimeAdapterConfigurationError, match="local_fake"):
+        skill_runtime_config.create_skill_runtime_for_run(
+            artifact_root=artifact_root,
+            project_id="demo_chatbot",
+            run_id="run_001",
+            adapter_name="local_fake",
+        )
+
+
+def test_codex_cli_adapter_missing_executable_fails_clearly():
+    adapter = CodexCliSkillAdapter(command="definitely_missing_codex_for_test")
+
+    with pytest.raises(SkillExecutionError, match="Codex CLI executable not found"):
+        adapter.execute(requirement_extraction_skill_definition(), [SourcePackage.from_dict(source_package_data())])
+
+
+def test_codex_cli_adapter_invalid_json_fails_clearly():
+    def runner(_args, _prompt, _timeout, _cwd):
+        return SimpleNamespace(returncode=0, stdout="not json", stderr="")
+
+    adapter = CodexCliSkillAdapter(command="codex", runner=runner)
+
+    with pytest.raises(SkillExecutionError, match="valid JSON"):
+        adapter.execute(requirement_extraction_skill_definition(), [SourcePackage.from_dict(source_package_data())])
+
+
+def test_codex_cli_schema_invalid_output_is_recorded_by_c06(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    input_artifact = write_source_package(store)
+    output_path = (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    )
+
+    def runner(_args, _prompt, _timeout, _cwd):
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"not": "a candidate package"}), stderr="")
+
+    definition = load_skill_definition(GOLDEN_DIR / "fake_skill_definition.json")
+    runtime = SkillRuntime(artifact_root=artifact_root, adapter=CodexCliSkillAdapter(command="codex", runner=runner))
+
+    with pytest.raises(SkillExecutionError, match="CandidateRequirementPackage"):
+        runtime.run_skill(
+            definition,
+            input_artifact_paths=[input_artifact.path],
+            output_artifact_paths=[output_path],
+            skill_run_id="skill_run_001",
+        )
+
+    record = SkillRunRecord.from_dict(
+        json.loads((artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json").read_text())
+    )
+    assert record.status == "failed"
+    assert "CandidateRequirementPackage" in record.error
+    assert not output_path.exists()
+
+
+def test_codex_cli_successful_output_is_validated_written_and_recorded(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    input_artifact = write_source_package(store)
+    output_path = (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    )
+    calls = []
+
+    def runner(args, prompt, timeout, cwd):
+        calls.append((args, prompt, timeout, cwd))
+        assert "--output-schema" in args
+        assert "--output-last-message" in args
+        assert args[-1] == "-"
+        assert "Return only one JSON object" in prompt
+        return SimpleNamespace(returncode=0, stdout=json.dumps(candidate_package_data()), stderr="")
+
+    definition = load_skill_definition(GOLDEN_DIR / "fake_skill_definition.json")
+    runtime = SkillRuntime(artifact_root=artifact_root, adapter=CodexCliSkillAdapter(command="codex", runner=runner))
+
+    record = runtime.run_skill(
+        definition,
+        input_artifact_paths=[input_artifact.path],
+        output_artifact_paths=[output_path],
+        skill_run_id="skill_run_001",
+    )
+
+    assert record.status == "succeeded"
+    assert len(calls) == 1
+    assert CandidateRequirementPackage.from_dict(json.loads(output_path.read_text(encoding="utf-8")))
+    run_record_path = artifact_root / "demo_chatbot" / "run_001" / "skill_runs" / "skill_run_001.json"
+    assert SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8"))) == record
 
 
 def test_run_skill_records_unknown_contract_failure_when_artifact_context_is_valid(tmp_path):

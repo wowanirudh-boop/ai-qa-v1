@@ -60,11 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser = subcommands.add_parser("extract-requirements")
     extract_parser.add_argument("--source-package", required=True, type=Path)
     extract_parser.add_argument("--skill-definition", type=Path, default=DEFAULT_SKILL_DEFINITION_PATH)
+    extract_parser.add_argument("--skill-adapter")
     extract_parser.set_defaults(func=_extract_requirements)
 
     atomize_parser = subcommands.add_parser("atomize-requirements")
     atomize_parser.add_argument("--candidates", required=True, type=Path)
     atomize_parser.add_argument("--skill-definition", type=Path)
+    atomize_parser.add_argument("--skill-adapter")
     atomize_parser.set_defaults(func=_atomize_requirements)
 
     govern_parser = subcommands.add_parser("govern-requirements")
@@ -79,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_tests_parser.add_argument("--obligations", required=True, type=Path)
     generate_tests_parser.add_argument("--skill-definition", type=Path, default=DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH)
     generate_tests_parser.add_argument("--oracle-skill-definition", type=Path, default=DEFAULT_ORACLE_GENERATOR_SKILL_DEFINITION_PATH)
+    generate_tests_parser.add_argument("--skill-adapter")
     generate_tests_parser.set_defaults(func=_generate_tests)
 
     validate_tests_parser = subcommands.add_parser("validate-tests")
@@ -97,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--config", type=Path, default=Path("project_config.json"))
     run_parser.add_argument("--run-id", required=True)
     run_parser.add_argument("--artifact-root", type=Path)
+    run_parser.add_argument("--skill-adapter")
     run_parser.add_argument("--skip-review", action="store_true")
     run_parser.add_argument("--skip-export", action="store_true")
     run_parser.set_defaults(func=_run_pipeline)
@@ -148,13 +152,24 @@ def _build_source_package(args: argparse.Namespace) -> int:
 
 
 def _extract_requirements(args: argparse.Namespace) -> int:
-    result = extract_requirements_from_source_package_artifact(args.source_package, args.skill_definition)
+    if args.skill_adapter is None:
+        result = extract_requirements_from_source_package_artifact(args.source_package, args.skill_definition)
+    else:
+        result = extract_requirements_from_source_package_artifact(
+            args.source_package,
+            args.skill_definition,
+            skill_adapter=args.skill_adapter,
+        )
     print(f"Extracted candidate requirements saved to {result.candidate_package_path}")
     return 0
 
 
 def _atomize_requirements(args: argparse.Namespace) -> int:
-    result = atomize_requirements_from_candidate_package_artifact(args.candidates, args.skill_definition)
+    result = atomize_requirements_from_candidate_package_artifact(
+        args.candidates,
+        args.skill_definition,
+        skill_adapter=args.skill_adapter,
+    )
     print(f"Atomized requirements saved to {result.atomic_ledger_path}")
     return 0
 
@@ -176,6 +191,7 @@ def _generate_tests(args: argparse.Namespace) -> int:
         args.obligations,
         args.skill_definition,
         args.oracle_skill_definition,
+        skill_adapter=args.skill_adapter,
     )
     print(f"Generated draft tests saved to {result.draft_suite_path}")
     return 0
@@ -208,6 +224,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         args.run_id,
         artifact_root=args.artifact_root,
         options=PipelineRunOptions(
+            skill_adapter=args.skill_adapter,
             include_review=not args.skip_review,
             include_export=not args.skip_export,
         ),

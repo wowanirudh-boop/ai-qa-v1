@@ -48,6 +48,17 @@ Optional later: `ai-testgen skills run --skill-id <skill_id> --input <artifact_p
 
 This component executes runtime skills. It should test with local fake skills only.
 
+## Execution adapters
+
+Supported adapter categories:
+
+- `test_fake`: unit-test-only deterministic fake adapters injected directly by tests.
+- `codex_cli`: intended v1 local/Codex production adapter. It executes `codex exec -` non-interactively, parses JSON output, and returns it to C06 for contract validation and artifact persistence.
+- `future_provider_adapter`: optional later provider integration. Business components must not add provider SDK/API calls directly.
+
+Adapter selection must be explicit through CLI options, environment configuration, or `ProjectConfig.metadata`.
+If no adapter is configured, C06 must fail clearly rather than falling back to fake behavior.
+
 ## Deterministic code responsibilities
 
 - Load and validate skill definitions.
@@ -90,4 +101,3 @@ Must not implement:
 - Runtime can execute fake skills with validated inputs and outputs.
 - Skill run records are persisted and test-covered.
 - No component-specific business logic is embedded in the runtime.
-

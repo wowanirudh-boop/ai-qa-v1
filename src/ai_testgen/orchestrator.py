@@ -65,6 +65,7 @@ class PipelineRunOptions:
     requirement_atomization_skill_definition: str | Path | None = None
     test_case_writer_skill_definition: str | Path | None = None
     oracle_generator_skill_definition: str | Path | None = None
+    skill_adapter: str | None = None
     resume: bool = True
     include_review: bool = True
     include_export: bool = True
@@ -147,11 +148,15 @@ class DefaultPipelineComponents:
         artifacts: dict[str, Path],
     ) -> dict[str, Path]:
         if context.options.requirement_extraction_skill_definition is None:
-            result = extract_requirements_from_source_package_artifact(artifacts["source_package"])
+            result = extract_requirements_from_source_package_artifact(
+                artifacts["source_package"],
+                skill_adapter=context.options.skill_adapter,
+            )
         else:
             result = extract_requirements_from_source_package_artifact(
                 artifacts["source_package"],
                 context.options.requirement_extraction_skill_definition,
+                skill_adapter=context.options.skill_adapter,
             )
         return {"candidate_requirement_package": result.candidate_package_path}
 
@@ -163,6 +168,7 @@ class DefaultPipelineComponents:
         result = atomize_requirements_from_candidate_package_artifact(
             artifacts["candidate_requirement_package"],
             context.options.requirement_atomization_skill_definition,
+            skill_adapter=context.options.skill_adapter,
         )
         return {"atomic_requirement_ledger": result.atomic_ledger_path}
 
@@ -191,6 +197,7 @@ class DefaultPipelineComponents:
             artifacts["test_obligation_ledger"],
             context.options.test_case_writer_skill_definition,
             context.options.oracle_generator_skill_definition,
+            skill_adapter=context.options.skill_adapter,
         )
         return {"draft_test_suite": result.draft_suite_path}
 

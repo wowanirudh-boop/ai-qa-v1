@@ -68,3 +68,31 @@ Traceability is represented by IDs and `source_refs`:
 - Validation must reject orphan test cases.
 - Export must include only eligible tests.
 
+## Manual Acceptance: Skill Adapter Wiring
+
+For live adapter acceptance, select the C06 adapter explicitly with `--skill-adapter codex_cli` or `AI_TESTGEN_SKILL_RUNTIME_ADAPTER=codex_cli`.
+If `codex` is not on `PATH`, set `AI_TESTGEN_CODEX_CLI_COMMAND` to the Codex CLI executable before running these commands.
+
+Stage 4:
+
+```powershell
+python -m ai_testgen.cli extract-requirements --source-package artifacts/{project_id}/{run_id}/02_source_package/source_package.json --skill-adapter codex_cli
+```
+
+Stage 5:
+
+```powershell
+python -m ai_testgen.cli atomize-requirements --candidates artifacts/{project_id}/{run_id}/03_candidate_requirements/candidate_requirement_package.json --skill-adapter codex_cli
+```
+
+Stage 7:
+
+```powershell
+python -m ai_testgen.cli generate-tests --obligations artifacts/{project_id}/{run_id}/06_test_obligations/test_obligation_ledger.json --skill-adapter codex_cli
+```
+
+Full pipeline:
+
+```powershell
+python -m ai_testgen.cli run --config path/to/project_config.json --run-id {run_id} --skill-adapter codex_cli
+```

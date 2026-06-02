@@ -25,6 +25,7 @@ from ai_testgen.skill_runtime import (
     load_skill_definition,
     validate_skill_definition,
 )
+from ai_testgen.skill_runtime_config import create_skill_runtime_for_run
 
 
 SOURCE_PACKAGE_STAGE = "02_source_package"
@@ -80,6 +81,7 @@ def extract_requirements_from_source_package_artifact(
     skill_definition: SkillDefinition | str | Path = DEFAULT_SKILL_DEFINITION_PATH,
     *,
     skill_runtime: SkillRuntime | None = None,
+    skill_adapter: str | None = None,
     skill_run_id: str | None = None,
     max_chunks_per_skill_run: int = 1,
 ) -> RequirementExtractionResult:
@@ -98,7 +100,15 @@ def extract_requirements_from_source_package_artifact(
 
     definition = _load_requirement_extraction_skill_definition(skill_definition)
     eligible_chunks = _eligible_source_chunks(source_package)
-    runtime = skill_runtime or SkillRuntime(artifact_root=artifact_root)
+    try:
+        runtime = skill_runtime or create_skill_runtime_for_run(
+            artifact_root=artifact_root,
+            project_id=project_id,
+            run_id=run_id,
+            adapter_name=skill_adapter,
+        )
+    except SkillRuntimeError as exc:
+        raise RequirementExtractionSkillError(f"Requirement extraction skill failed: {exc}") from exc
     batches = list(_chunk_batches(eligible_chunks, max_chunks_per_skill_run))
     raw_candidate_packages: list[CandidateRequirementPackage] = []
     skill_run_records: list[SkillRunRecord] = []

@@ -443,6 +443,12 @@ artifacts/{project_id}/{run_id}/skill_runs/{skill_run_id}.json
 
 C06 is the only allowed boundary for runtime skill execution. No business component may call an LLM directly.
 
+### Adapter types
+
+- `test_fake`: unit-test-only deterministic fake adapters injected by tests.
+- `codex_cli`: intended v1 local/Codex production adapter using non-interactive Codex CLI execution.
+- `future_provider_adapter`: optional later provider integration; not required for v1 and not owned by business components.
+
 ### Done when
 
 The runtime can execute fake skills with validated inputs and outputs, and skill runs are persisted and test-covered.

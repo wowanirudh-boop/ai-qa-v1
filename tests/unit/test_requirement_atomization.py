@@ -7,7 +7,9 @@ import pytest
 
 import ai_testgen.cli as cli
 import ai_testgen.requirement_atomization as requirement_atomization
+import ai_testgen.skill_runtime_config as skill_runtime_config
 from ai_testgen.artifact_store import ArtifactStore
+from ai_testgen.codex_cli_adapter import CODEX_CLI_ADAPTER_NAME
 from ai_testgen.requirement_atomization import (
     CandidatePackageArtifactError,
     DEFAULT_SKILL_DEFINITION_PATH,
@@ -118,6 +120,30 @@ def write_candidate_package(store: ArtifactStore, *, data: dict | None = None):
     )
 
 
+def write_project_config(store: ArtifactStore, *, metadata: dict | None = None):
+    return store.write_json(
+        "demo_chatbot",
+        "run_001",
+        "00_project_config",
+        "project_config",
+        {
+            "project_id": "demo_chatbot",
+            "bot_name": "Demo Support Bot",
+            "target_url": "https://example.test/chat",
+            "coverage_policy": {
+                "require_negative_tests": True,
+                "require_positive_tests": True,
+            },
+            "approval_policy": {
+                "allow_export_without_review": False,
+                "require_human_approval_for_inferred": True,
+            },
+            "source_paths": ["requirements.md"],
+            "metadata": metadata or {},
+        },
+    )
+
+
 def runtime_with_adapter(artifact_root: Path, output: dict) -> tuple[SkillRuntime, FakeRequirementAtomizationAdapter]:
     adapter = FakeRequirementAtomizationAdapter(output)
     return SkillRuntime(artifact_root=artifact_root, adapter=adapter), adapter
@@ -172,6 +198,82 @@ def test_production_atomization_uses_skill_runtime_when_no_skill_definition_is_s
     assert AtomicRequirementLedger.from_dict(
         json.loads(expected_atomic_path.read_text(encoding="utf-8"))
     ) == result.atomic_ledger
+
+
+def test_requirement_atomization_uses_project_configured_codex_cli_adapter(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store, metadata={"skill_runtime_adapter": CODEX_CLI_ADAPTER_NAME})
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, skill_definition, input_artifacts):
+            calls.append((skill_definition, input_artifacts))
+            return atomic_ledger_data()
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    result = atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
+    assert len(calls) == 1
+    assert isinstance(calls[0][1][0], CandidateRequirementPackage)
+
+
+def test_requirement_atomization_can_use_explicit_codex_cli_adapter(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, skill_definition, input_artifacts):
+            calls.append((skill_definition, input_artifacts))
+            return atomic_ledger_data()
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    result = atomize_requirements_from_candidate_package_artifact(
+        candidate_artifact.path,
+        skill_adapter=CODEX_CLI_ADAPTER_NAME,
+    )
+
+    assert result.atomic_ledger.to_dict() == atomic_ledger_data()
+    assert len(calls) == 1
+
+
+def test_requirement_atomization_without_adapter_fails_clearly(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+
+    with pytest.raises(RequirementAtomizationSkillError, match="requires an execution adapter"):
+        atomize_requirements_from_candidate_package_artifact(candidate_artifact.path)
+
+
+def test_requirement_atomization_unknown_adapter_fails_clearly(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    candidate_artifact = write_candidate_package(store)
+    default_skill_path = tmp_path / DEFAULT_SKILL_DEFINITION_PATH
+    write_skill_definition(default_skill_path)
+    monkeypatch.setattr(requirement_atomization, "DEFAULT_SKILL_DEFINITION_PATH", default_skill_path)
+
+    with pytest.raises(RequirementAtomizationSkillError, match="Unknown skill runtime adapter: local_fake"):
+        atomize_requirements_from_candidate_package_artifact(
+            candidate_artifact.path,
+            skill_adapter="local_fake",
+        )
 
 
 def test_candidate_split_into_multiple_atomic_requirements():
@@ -560,8 +662,8 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
     atomic_path = tmp_path / "atomic_requirement_ledger.json"
     calls = []
 
-    def fake_atomize(candidates, skill_definition=None):
-        calls.append((candidates, skill_definition))
+    def fake_atomize(candidates, skill_definition=None, *, skill_adapter=None):
+        calls.append((candidates, skill_definition, skill_adapter))
         return SimpleNamespace(atomic_ledger_path=atomic_path)
 
     monkeypatch.setattr(cli, "atomize_requirements_from_candidate_package_artifact", fake_atomize)
@@ -573,6 +675,8 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
             str(candidate_path),
             "--skill-definition",
             str(skill_definition_path),
+            "--skill-adapter",
+            CODEX_CLI_ADAPTER_NAME,
         ]
     )
 
@@ -580,7 +684,7 @@ def test_cli_atomize_requirements_smoke_delegates_to_c08(tmp_path, monkeypatch, 
     assert exit_code == 0
     assert str(atomic_path) in captured.out
     assert captured.err == ""
-    assert calls == [(candidate_path, skill_definition_path)]
+    assert calls == [(candidate_path, skill_definition_path, CODEX_CLI_ADAPTER_NAME)]
 
 
 def test_cli_atomize_requirements_reports_invalid_candidate_artifact(tmp_path, capsys):

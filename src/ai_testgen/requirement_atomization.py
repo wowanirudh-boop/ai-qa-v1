@@ -21,12 +21,12 @@ from ai_testgen.schemas import (
 )
 from ai_testgen.skill_runtime import (
     InvalidSkillDefinitionError,
-    SkillExecutionError,
     SkillRuntime,
     SkillRuntimeError,
     load_skill_definition,
     validate_skill_definition,
 )
+from ai_testgen.skill_runtime_config import create_skill_runtime_for_run
 
 
 CANDIDATE_REQUIREMENTS_STAGE = "03_candidate_requirements"
@@ -127,6 +127,7 @@ def atomize_requirements_from_candidate_package_artifact(
     skill_definition: SkillDefinition | str | Path | None = None,
     *,
     skill_runtime: SkillRuntime | None = None,
+    skill_adapter: str | None = None,
     skill_run_id: str | None = None,
 ) -> RequirementAtomizationResult:
     candidate_path = Path(candidate_package_path)
@@ -147,6 +148,7 @@ def atomize_requirements_from_candidate_package_artifact(
         run_id=run_id,
         skill_definition=DEFAULT_SKILL_DEFINITION_PATH if skill_definition is None else skill_definition,
         skill_runtime=skill_runtime,
+        skill_adapter=skill_adapter,
         skill_run_id=skill_run_id,
     )
     written = _write_atomic_ledger(store, run_id=run_id, atomic_ledger=atomic_ledger)
@@ -219,6 +221,7 @@ def _atomize_with_skill(
     run_id: str,
     skill_definition: SkillDefinition | str | Path,
     skill_runtime: SkillRuntime | None,
+    skill_adapter: str | None,
     skill_run_id: str | None,
 ) -> tuple[AtomicRequirementLedger, SkillRunRecord]:
     definition = _load_requirement_atomization_skill_definition(skill_definition)
@@ -230,16 +233,21 @@ def _atomize_with_skill(
         RAW_ATOMIC_REQUIREMENT_LEDGER_ARTIFACT_NAME,
     )
     run_id_for_skill = skill_run_id or _next_skill_run_id(store, project_id, run_id)
-    runtime = skill_runtime or SkillRuntime(artifact_root=store.artifact_root)
 
     try:
+        runtime = skill_runtime or create_skill_runtime_for_run(
+            artifact_root=store.artifact_root,
+            project_id=project_id,
+            run_id=run_id,
+            adapter_name=skill_adapter,
+        )
         skill_run_record = runtime.run_skill(
             definition,
             input_artifact_paths=[candidate_path],
             output_artifact_paths=[raw_atomic_path],
             skill_run_id=run_id_for_skill,
         )
-    except SkillExecutionError as exc:
+    except SkillRuntimeError as exc:
         raise RequirementAtomizationSkillError(f"Requirement atomization skill failed: {exc}") from exc
 
     raw_atomic_ledger = _load_atomic_ledger(

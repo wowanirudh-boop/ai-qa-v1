@@ -7,7 +7,9 @@ import pytest
 
 import ai_testgen.cli as cli
 import ai_testgen.requirement_extraction as requirement_extraction
+import ai_testgen.skill_runtime_config as skill_runtime_config
 from ai_testgen.artifact_store import ArtifactStore
+from ai_testgen.codex_cli_adapter import CODEX_CLI_ADAPTER_NAME
 from ai_testgen.requirement_extraction import (
     InvalidRequirementExtractionSkillError,
     InvalidCandidateRequirementPackageError,
@@ -152,6 +154,29 @@ def write_source_package(store: ArtifactStore, *, data: dict | None = None):
     )
 
 
+def write_project_config(
+    store: ArtifactStore,
+    *,
+    project_id: str = "demo_chatbot",
+    run_id: str = "run_001",
+    metadata: dict | None = None,
+):
+    return store.write_json(
+        project_id,
+        run_id,
+        "00_project_config",
+        "project_config",
+        {
+            "project_id": project_id,
+            "bot_name": "Demo Bot",
+            "target_url": "https://example.test/chat",
+            "coverage_policy": {"require_positive_tests": True},
+            "approval_policy": {"allow_export_without_review": False},
+            "metadata": metadata or {},
+        },
+    )
+
+
 def runtime_with_adapter(artifact_root: Path, output) -> tuple[SkillRuntime, FakeRequirementExtractionAdapter]:
     adapter = FakeRequirementExtractionAdapter(output)
     return SkillRuntime(artifact_root=artifact_root, adapter=adapter), adapter
@@ -268,6 +293,88 @@ def test_unknown_chunk_reference_fails_cross_artifact_validation(tmp_path):
         / "03_candidate_requirements"
         / "candidate_requirement_package.json"
     ).exists()
+
+
+def test_requirement_extraction_succeeds_through_c06_with_codex_cli_adapter_for_generic_fixture(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_data = source_package_data(
+        project_id="billing_chatbot",
+        chunks=[
+            source_chunk(
+                chunk_id="chunk_001",
+                text="The bot must collect the invoice number before showing the account balance.",
+            ),
+            source_chunk(
+                chunk_id="chunk_002",
+                text="The bot must offer an agent handoff when the customer cannot provide an invoice number.",
+            ),
+        ],
+    )
+    source_artifact = store.write_json(
+        "billing_chatbot",
+        "run_001",
+        "02_source_package",
+        "source_package",
+        source_data,
+    )
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, skill_definition, input_artifacts):
+            calls.append((skill_definition, input_artifacts))
+            chunk = input_artifacts[0].chunks[0]
+            return candidate_package_data(
+                project_id="billing_chatbot",
+                candidates=[
+                    candidate_requirement(
+                        candidate_id=f"codex_candidate_{len(calls)}",
+                        statement=f"Requirement from {chunk.chunk_id}: {chunk.text}",
+                        source_refs=[source_ref(chunk_id=chunk.chunk_id, document_id=chunk.document_id)],
+                    )
+                ],
+                chunk_extraction_results=[
+                    chunk_extraction_result(
+                        chunk.chunk_id,
+                        "requirements_extracted",
+                        candidate_ids=[f"codex_candidate_{len(calls)}"],
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    result = extract_requirements_from_source_package_artifact(
+        source_artifact.path,
+        requirement_extraction_skill_definition(skill_id="requirement_extraction_v1"),
+        skill_adapter=CODEX_CLI_ADAPTER_NAME,
+    )
+
+    assert result.skill_run_record.status == "succeeded"
+    assert len(calls) == 2
+    assert [candidate.candidate_id for candidate in result.candidate_package.candidates] == [
+        "cand_001",
+        "cand_002",
+    ]
+    known_chunk_ids = {chunk["chunk_id"] for chunk in source_data["chunks"]}
+    for candidate in result.candidate_package.candidates:
+        assert candidate.source_refs
+        for candidate_source_ref in candidate.source_refs:
+            assert candidate_source_ref.document_id == "doc_001"
+            assert candidate_source_ref.chunk_id in known_chunk_ids
+    assert {
+        chunk_result.chunk_id: [candidate_id for candidate_id in chunk_result.candidate_ids]
+        for chunk_result in result.candidate_package.chunk_extraction_results or []
+    } == {
+        "chunk_001": ["cand_001"],
+        "chunk_002": ["cand_002"],
+    }
+    assert CandidateRequirementPackage.from_dict(
+        json.loads(result.candidate_package_path.read_text(encoding="utf-8"))
+    ) == result.candidate_package
 
 
 def test_wrong_document_id_for_source_ref_fails_cross_artifact_validation(tmp_path):
@@ -638,6 +745,78 @@ def test_cli_extract_requirements_smoke_delegates_to_c07(tmp_path, monkeypatch, 
     assert calls == [(source_path, skill_definition_path)]
 
 
+def test_cli_extract_requirements_uses_project_configured_codex_cli_adapter(tmp_path, monkeypatch, capsys):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    write_project_config(store, metadata={"skill_runtime_adapter": CODEX_CLI_ADAPTER_NAME})
+    source_artifact = write_source_package(store)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, _skill_definition, _input_artifacts):
+            calls.append(_input_artifacts)
+            return candidate_package_data()
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    exit_code = cli.main(
+        [
+            "extract-requirements",
+            "--source-package",
+            str(source_artifact.path),
+            "--skill-definition",
+            str(Path("skills") / "requirement_extraction_v1.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "candidate_requirement_package.json" in captured.out
+    assert captured.err == ""
+    assert len(calls) == 1
+    package_path = (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    )
+    package = CandidateRequirementPackage.from_dict(json.loads(package_path.read_text(encoding="utf-8")))
+    assert package.candidates[0].source_refs[0].chunk_id == "chunk_001"
+
+
+def test_cli_extract_requirements_can_use_explicit_codex_cli_adapter(tmp_path, monkeypatch, capsys):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(store)
+    calls = []
+
+    class StubCodexCliAdapter:
+        def execute(self, _skill_definition, _input_artifacts):
+            calls.append(_input_artifacts)
+            return candidate_package_data()
+
+    monkeypatch.setattr(skill_runtime_config, "CodexCliSkillAdapter", StubCodexCliAdapter)
+
+    exit_code = cli.main(
+        [
+            "extract-requirements",
+            "--source-package",
+            str(source_artifact.path),
+            "--skill-definition",
+            str(Path("skills") / "requirement_extraction_v1.json"),
+            "--skill-adapter",
+            CODEX_CLI_ADAPTER_NAME,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "candidate_requirement_package.json" in captured.out
+    assert captured.err == ""
+    assert len(calls) == 1
+
+
 def test_cli_extract_requirements_reports_missing_skill_definition(tmp_path, capsys):
     artifact_root = tmp_path / "artifacts"
     store = ArtifactStore(artifact_root)
@@ -659,6 +838,34 @@ def test_cli_extract_requirements_reports_missing_skill_definition(tmp_path, cap
     assert captured.out == ""
     assert "error:" in captured.err
     assert "SkillDefinition" in captured.err
+
+
+def test_cli_extract_requirements_without_adapter_does_not_use_fake_path(tmp_path, capsys):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    source_artifact = write_source_package(store)
+
+    exit_code = cli.main(
+        [
+            "extract-requirements",
+            "--source-package",
+            str(source_artifact.path),
+            "--skill-definition",
+            str(Path("skills") / "requirement_extraction_v1.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "requires an execution adapter" in captured.err
+    assert not (
+        artifact_root
+        / "demo_chatbot"
+        / "run_001"
+        / "03_candidate_requirements"
+        / "candidate_requirement_package.json"
+    ).exists()
 
 
 def test_c07_writes_no_future_component_artifacts(tmp_path):

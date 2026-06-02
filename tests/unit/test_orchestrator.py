@@ -1,12 +1,14 @@
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import ai_testgen.cli as cli
 import ai_testgen.orchestrator as orchestrator
 from ai_testgen.artifact_store import ArtifactStore
+from ai_testgen.codex_cli_adapter import CODEX_CLI_ADAPTER_NAME
 from ai_testgen.orchestrator import PipelineOrchestrationError, PipelineRunOptions, run_pipeline
 from ai_testgen.schemas import PIPELINE_RUN_STAGES, PipelineRunState, ProjectConfig
 
@@ -384,6 +386,64 @@ def test_run_pipeline_happy_path_uses_components_in_order_and_persists_final_sta
     assert stable_json(result.state.to_dict()) == (GOLDEN_DIR / "pipeline_run_state.json").read_text(
         encoding="utf-8"
     )
+
+
+def test_default_pipeline_components_pass_skill_adapter_to_skill_required_stages(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    config_path = tmp_path / "project_config.json"
+    context = orchestrator.PipelineRunContext(
+        config_path=config_path,
+        project_config=ProjectConfig.from_dict(project_config_data(artifact_root)),
+        run_id="run_001",
+        artifact_root=artifact_root,
+        source_base_dir=tmp_path,
+        options=PipelineRunOptions(skill_adapter=CODEX_CLI_ADAPTER_NAME),
+    )
+    source_path = artifact_root / "demo_chatbot" / "run_001" / "02_source_package" / "source_package.json"
+    candidate_path = artifact_root / "demo_chatbot" / "run_001" / "03_candidate_requirements" / "candidate_requirement_package.json"
+    obligation_path = artifact_root / "demo_chatbot" / "run_001" / "06_test_obligations" / "test_obligation_ledger.json"
+    calls = []
+
+    def fake_extract(source_package, skill_definition=None, *, skill_adapter=None):
+        calls.append(("C07", source_package, skill_definition, skill_adapter))
+        return SimpleNamespace(candidate_package_path=candidate_path)
+
+    def fake_atomize(candidates, skill_definition=None, *, skill_adapter=None):
+        calls.append(("C08", candidates, skill_definition, skill_adapter))
+        return SimpleNamespace(atomic_ledger_path=artifact_root / "atomic.json")
+
+    def fake_generate(
+        obligations,
+        test_case_writer_skill_definition=None,
+        oracle_generator_skill_definition=None,
+        *,
+        skill_adapter=None,
+    ):
+        calls.append(
+            (
+                "C11",
+                obligations,
+                test_case_writer_skill_definition,
+                oracle_generator_skill_definition,
+                skill_adapter,
+            )
+        )
+        return SimpleNamespace(draft_suite_path=artifact_root / "draft.json")
+
+    monkeypatch.setattr(orchestrator, "extract_requirements_from_source_package_artifact", fake_extract)
+    monkeypatch.setattr(orchestrator, "atomize_requirements_from_candidate_package_artifact", fake_atomize)
+    monkeypatch.setattr(orchestrator, "generate_tests_from_obligation_ledger_artifact", fake_generate)
+
+    components = orchestrator.DefaultPipelineComponents()
+    components.run_requirement_extraction(context, {"source_package": source_path})
+    components.run_requirement_atomization(context, {"candidate_requirement_package": candidate_path})
+    components.run_test_generation(context, {"test_obligation_ledger": obligation_path})
+
+    assert calls == [
+        ("C07", source_path, None, CODEX_CLI_ADAPTER_NAME),
+        ("C08", candidate_path, None, CODEX_CLI_ADAPTER_NAME),
+        ("C11", obligation_path, None, None, CODEX_CLI_ADAPTER_NAME),
+    ]
 
 
 def test_run_pipeline_resumes_from_existing_valid_checkpoints(tmp_path):
@@ -786,6 +846,50 @@ def test_cli_run_smoke_delegates_to_orchestrator(tmp_path, monkeypatch, capsys):
     assert str(state_path) in captured.out
     assert captured.err == ""
     assert calls == [(config_path, "run_001", artifact_root, PipelineRunOptions())]
+
+
+def test_cli_run_can_pass_skill_adapter_to_orchestrator(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "project_config.json"
+    artifact_root = tmp_path / "artifacts"
+    state_path = artifact_root / "demo_chatbot" / "run_001" / "pipeline_run_state.json"
+    calls = []
+
+    class FakeResult:
+        def __init__(self) -> None:
+            self.state_path = state_path
+
+    def fake_run_pipeline(config, run_id, *, artifact_root=None, options=None, **_kwargs):
+        calls.append((config, run_id, artifact_root, options))
+        return FakeResult()
+
+    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+
+    exit_code = cli.main(
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--run-id",
+            "run_001",
+            "--artifact-root",
+            str(artifact_root),
+            "--skill-adapter",
+            CODEX_CLI_ADAPTER_NAME,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert str(state_path) in captured.out
+    assert captured.err == ""
+    assert calls == [
+        (
+            config_path,
+            "run_001",
+            artifact_root,
+            PipelineRunOptions(skill_adapter=CODEX_CLI_ADAPTER_NAME),
+        )
+    ]
 
 
 def test_cli_run_skip_flags_disable_review_and_export(tmp_path, monkeypatch, capsys):

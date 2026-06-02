@@ -32,6 +32,7 @@ from ai_testgen.skill_runtime import (
     load_skill_definition,
     validate_skill_definition,
 )
+from ai_testgen.skill_runtime_config import create_skill_runtime_for_run
 from ai_testgen.validators import validate_obligation_links, validate_test_case_links
 
 
@@ -93,6 +94,7 @@ def generate_tests_from_obligation_ledger_artifact(
     oracle_generator_skill_definition: SkillDefinition | str | Path | None = None,
     *,
     skill_runtime: SkillRuntime | None = None,
+    skill_adapter: str | None = None,
     skill_run_id: str | None = None,
     max_obligations_per_skill_run: int = 1,
 ) -> TestGenerationResult:
@@ -126,7 +128,15 @@ def generate_tests_from_obligation_ledger_artifact(
         expected_output_contract=ORACLE_GENERATOR_OUTPUT_CONTRACT,
     )
 
-    runtime = skill_runtime or SkillRuntime(artifact_root=artifact_root)
+    try:
+        runtime = skill_runtime or create_skill_runtime_for_run(
+            artifact_root=artifact_root,
+            project_id=project_id,
+            run_id=run_id,
+            adapter_name=skill_adapter,
+        )
+    except SkillRuntimeError as exc:
+        raise TestGenerationSkillError(f"Test generation skill failed: {exc}") from exc
     eligible_obligations = _eligible_obligations(obligation_ledger)
     raw_draft_suites: list[DraftTestSuite] = []
     skill_run_records: list[SkillRunRecord] = []
