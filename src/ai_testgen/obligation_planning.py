@@ -239,11 +239,12 @@ def _obligation_plans_for_requirement(
 
     requirement_type = _normalized_requirement_type(requirement)
     plans: list[_ObligationPlan] = []
-    if requirement_type == "entity_collection":
+    if _plans_entity_collection(requirement):
+        entity_planning_rule = "entity_collection" if requirement_type == "entity_collection" else requirement_type
         if coverage_settings.require_negative:
-            plans.append(_missing_entity_plan(requirement, "entity_collection"))
+            plans.append(_missing_entity_plan(requirement, entity_planning_rule))
         if coverage_settings.require_positive:
-            plans.append(_provided_entity_plan(requirement, "entity_collection"))
+            plans.append(_provided_entity_plan(requirement, entity_planning_rule))
         if coverage_settings.require_negative and _supports_invalid_entity(requirement):
             plans.append(_invalid_entity_plan(requirement, "entity_collection_validation"))
         return _dedupe_plans(plans)
@@ -502,54 +503,91 @@ def _normalized_statement(requirement: AtomicRequirement) -> str:
     return " ".join(requirement.statement.lower().split())
 
 
+def _normalized_requirement_context(requirement: AtomicRequirement) -> str:
+    text_parts = [requirement.statement]
+    text_parts.extend(
+        source_ref.quote
+        for source_ref in requirement.source_refs or []
+        if source_ref.quote
+    )
+    if requirement.metadata:
+        text_parts.extend(_metadata_text_values(requirement.metadata))
+    return " ".join(" ".join(part.lower().split()) for part in text_parts if part)
+
+
 def _is_api_schema_only_requirement(requirement: AtomicRequirement) -> bool:
-    if _metadata_truthy(requirement, "chatbot_testable"):
+    if _metadata_truthy(requirement, "chatbot_testable") or _documents_user_facing_requirement(requirement):
         return False
-    if _metadata_truthy(requirement, "api_schema_only") or _metadata_value_in(
+    if _metadata_truthy(requirement, "api_schema_only") or _metadata_truthy(
+        requirement,
+        "non_chatbot_api_schema",
+    ) or _metadata_value_in(
         requirement,
         "test_track",
         {"api_contract", "api_schema"},
-    ):
+    ) or _has_backend_contract_metadata(requirement):
         return True
 
     requirement_type = _normalized_requirement_type(requirement)
-    statement = _normalized_statement(requirement)
-    if _documents_user_facing_bot_behavior(statement):
-        return False
-
+    context = _normalized_requirement_context(requirement)
     if requirement_type in {
         "response_contract",
+        "request_contract",
         "response_field",
+        "request_field",
         "functional_response_content",
         "input_type",
+        "api_contract",
+        "object_schema",
     }:
         return True
     if requirement_type in {
         "validation_rule",
         "conditional_validation_rule",
         "validation_constraint",
-    } and _mentions_api_response_schema(statement):
+    } and _mentions_backend_contract_detail(context):
         return True
     if requirement_type in {"api_error_handling", "api_success_handling", "api_behavior"}:
         return True
     return False
 
 
-def _documents_user_facing_bot_behavior(statement: str) -> bool:
+def _documents_user_facing_requirement(requirement: AtomicRequirement) -> bool:
+    return (
+        _metadata_truthy(requirement, "documents_user_facing_bot_behavior")
+        or _metadata_truthy(requirement, "user_facing")
+        or _metadata_truthy(requirement, "bot_visible")
+        or _metadata_truthy(requirement, "chatbot_testable")
+        or _documents_user_facing_bot_behavior(_normalized_requirement_context(requirement))
+    )
+
+
+def _documents_user_facing_bot_behavior(text: str) -> bool:
     return any(
-        cue in statement
+        cue in text
         for cue in (
             "bot must respond",
             "bot should respond",
             "chatbot must respond",
             "chatbot should respond",
+            "assistant must respond",
+            "assistant should respond",
             "standardized bot output",
             "standardized output",
             "bot output",
             "must prompt",
             "should prompt",
+            "prompt the user",
             "must ask",
             "should ask",
+            "bot must tell",
+            "bot should tell",
+            "chatbot must tell",
+            "chatbot should tell",
+            "tell the user",
+            "show the user",
+            "display to the user",
+            "present to the user",
             "must transfer",
             "should transfer",
             "transfer the conversation",
@@ -561,79 +599,136 @@ def _documents_user_facing_bot_behavior(statement: str) -> bool:
             "say that",
             "before responding",
             "in chat",
+            "user-facing",
+            "visible to the user",
         )
     )
 
 
-def _mentions_api_response_schema(statement: str) -> bool:
-    if "phone" in statement or "phonenumber" in statement:
-        return False
+def _mentions_backend_contract_detail(text: str) -> bool:
     return any(
-        cue in statement
+        cue in text
         for cue in (
-            "response includes",
-            "response field",
-            "top-level success",
+            "api response",
+            "api request",
+            "response body",
+            "request body",
+            "response schema",
+            "request schema",
+            "payload",
+            "schema",
+            "field",
+            "property",
+            "object",
+            "parameter",
+            "endpoint",
+            "json",
+            "top-level",
             "data object",
-            "order details data",
-            "orderid field",
-            "carrier value",
-            "trackinglink value",
-            "expecteddeliverydate value",
-            "status value",
+            "response includes",
+            "request includes",
             "must be a string",
+            "must be an integer",
+            "must be a number",
+            "must be a boolean",
             "url string",
             "maximum length",
             "max length",
             "nullable",
-            "yyyy-mm-dd format",
+            "nullability",
             "enum:",
+            "required field",
         )
     )
 
 
+def _has_backend_contract_metadata(requirement: AtomicRequirement) -> bool:
+    backend_keys = {
+        "backendonly",
+        "apischemaonly",
+        "nonchatbotapischema",
+        "apicontract",
+        "responsefield",
+        "requestfield",
+        "objectschema",
+        "fieldtype",
+        "nullability",
+        "maxlength",
+        "required",
+        "payloadschema",
+        "responseschema",
+        "request" + "schema",
+        "endpoint",
+    }
+    return any(_metadata_has_key(requirement, key) for key in backend_keys)
+
+
 def _is_user_facing_api_error_requirement(requirement: AtomicRequirement) -> bool:
     requirement_type = _normalized_requirement_type(requirement)
-    statement = _normalized_statement(requirement)
     if requirement_type not in {
         "api_error_handling",
         "error_response_mapping",
         "response_behavior",
-    }:
+    } and not _metadata_present_any(requirement, {"documented_errors", "error_condition"}):
         return False
-    return _mentions_api_error_condition(statement) and _documents_user_facing_bot_behavior(statement)
+    return _is_documented_error_condition(requirement) and _documents_user_facing_requirement(requirement)
 
 
-def _mentions_api_error_condition(statement: str) -> bool:
+def _is_documented_error_condition(requirement: AtomicRequirement) -> bool:
+    if _metadata_present_any(
+        requirement,
+        {
+            "documented_errors",
+            "error_condition",
+            "fallback",
+            "human_handoff",
+            "unsupported_self_service",
+            "no_result_condition",
+        },
+    ):
+        return True
+    return _mentions_api_error_condition(_normalized_requirement_context(requirement))
+
+
+def _mentions_api_error_condition(text: str) -> bool:
     return any(
-        cue in statement
+        cue in text
         for cue in (
             "api returns",
+            "api error",
             "http 400",
             "http 401",
+            "http 403",
             "http 404",
             "http 429",
             "http 500",
+            "error code",
             "err_",
-            "no active orders",
             "incorrect format",
             "server rejects",
             "not found",
+            "no matching",
+            "no result",
+            "no results",
             "rate limit",
             "unauthorized",
+            "unavailable",
+            "timeout",
             "database failure",
             "upstream service failure",
+            "service failure",
         )
     )
 
 
 def _is_user_facing_api_success_requirement(requirement: AtomicRequirement) -> bool:
     requirement_type = _normalized_requirement_type(requirement)
-    statement = _normalized_statement(requirement)
     if requirement_type == "status_response":
-        return _documents_user_facing_bot_behavior(statement)
-    if requirement_type == "api_behavior":
-        return _metadata_truthy(requirement, "documents_user_facing_bot_behavior")
+        return _documents_user_facing_requirement(requirement)
+    if requirement_type in {"api_behavior", "api_success_handling", "response_behavior"}:
+        return _documents_user_facing_requirement(requirement)
+    if requirement_type in {"response_field", "functional_response_content"}:
+        return _documents_user_facing_requirement(requirement)
     return False
 
 
@@ -645,11 +740,21 @@ def _is_input_validation_requirement(requirement: AtomicRequirement) -> bool:
 
 
 def _supports_invalid_entity(requirement: AtomicRequirement) -> bool:
-    if _metadata_present(requirement, "validation_rules") or _metadata_present(requirement, "documented_errors"):
+    if _metadata_present_any(
+        requirement,
+        {
+            "validation_rules",
+            "documented_errors",
+            "entity_format",
+            "validation_pattern",
+            "format_constraints",
+            "invalid_entity_conditions",
+        },
+    ):
         return True
-    statement = _normalized_statement(requirement)
-    return ("phone" in statement or "phonenumber" in statement or "input" in statement) and any(
-        cue in statement
+    context = _normalized_requirement_context(requirement)
+    return any(
+        cue in context
         for cue in (
             "invalid",
             "incorrect format",
@@ -662,45 +767,73 @@ def _supports_invalid_entity(requirement: AtomicRequirement) -> bool:
             "country codes",
             "format",
             "length",
+            "pattern",
+            "regex",
         )
     )
 
 
 def _is_missing_entity_requirement(requirement: AtomicRequirement) -> bool:
-    requirement_type = _normalized_requirement_type(requirement)
-    statement = _normalized_statement(requirement)
-    if requirement_type == "input_parameter" and ("phone" in statement or "phonenumber" in statement):
-        return "required" in statement or "provided" in statement
-    return any(
-        cue in statement
-        for cue in (
-            "ask for",
-            "prompt",
-            "please enter",
-            "collect",
-            "must be provided",
-            "before showing",
-            "before providing",
-            "before continuing",
-        )
-    ) and any(
-        entity in statement
-        for entity in (
-            "phone",
-            "phonenumber",
-            "order number",
-            "order id",
-            "order status",
-        )
-    )
+    return _plans_entity_collection(requirement)
 
 
 def _is_provided_entity_requirement(requirement: AtomicRequirement) -> bool:
-    statement = _normalized_statement(requirement)
+    return _plans_entity_collection(requirement)
+
+
+def _plans_entity_collection(requirement: AtomicRequirement) -> bool:
+    requirement_type = _normalized_requirement_type(requirement)
+    if requirement_type == "entity_collection":
+        return True
+    if _extract_required_entities(requirement):
+        return True
+    if requirement_type in {"input_parameter", "required_input", "input_collection"}:
+        return _documents_entity_collection(requirement)
+    return _documents_entity_collection(requirement)
+
+
+def _extract_required_entities(requirement: AtomicRequirement) -> list[str]:
+    if not requirement.metadata:
+        return []
+    values: list[str] = []
+    for key in ("required_entity", "required_entities", "supported_entities", "entity_type"):
+        value = requirement.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+        elif isinstance(value, list):
+            values.extend(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return values
+
+
+def _documents_entity_collection(requirement: AtomicRequirement) -> bool:
+    context = _normalized_requirement_context(requirement)
+    collection_cues = (
+        "ask for",
+        "prompt for",
+        "prompt the user",
+        "please enter",
+        "collect",
+        "request",
+        "must be provided",
+        "provide",
+        "provided",
+        "user enters",
+    )
+    sequencing_cues = (
+        "before",
+        "required",
+        "continue",
+        "continuing",
+        "lookup",
+        "retrieve",
+        "proceed",
+        "verify",
+    )
+    actor_cues = ("bot", "chatbot", "assistant", "in chat")
     return (
-        ("provides" in statement or "provide" in statement or "registered phone number" in statement)
-        and ("phone" in statement or "phonenumber" in statement)
-        and ("track" in statement or "delivery status" in statement or "latest order" in statement)
+        any(actor in context for actor in actor_cues)
+        and any(cue in context for cue in collection_cues)
+        and any(cue in context for cue in sequencing_cues)
     )
 
 
@@ -719,21 +852,64 @@ def _is_human_handoff_requirement(requirement: AtomicRequirement) -> bool:
 
 
 def _is_faq_like_requirement(requirement: AtomicRequirement) -> bool:
-    statement = _normalized_statement(requirement)
+    return _is_documented_faq_behavior(requirement)
+
+
+def _is_documented_faq_behavior(requirement: AtomicRequirement) -> bool:
+    if _metadata_present_any(requirement, {"faq", "faq_answer", "knowledge_base_answer"}):
+        return True
+    context = _normalized_requirement_context(requirement)
     return any(
-        cue in statement
+        cue in context
         for cue in (
+            "faq",
+            "question:",
+            "answer:",
+            "if the user asks",
             "does not know",
             "do not know",
             "don't know",
             "if the user does not have",
-            "email address or order id",
+            "alternate support path",
+            "unsupported self-service",
+            "contact support",
+            "knowledge base",
         )
     )
 
 
 def _supports_adjacent_topic_refusal(requirement: AtomicRequirement) -> bool:
     return _metadata_truthy(requirement, "adjacent_topic_refusal_documented")
+
+
+def _metadata_text_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        values: list[str] = []
+        for item in value:
+            values.extend(_metadata_text_values(item))
+        return values
+    if isinstance(value, dict):
+        values: list[str] = []
+        for item in value.values():
+            values.extend(_metadata_text_values(item))
+        return values
+    return []
+
+
+def _metadata_present_any(requirement: AtomicRequirement, keys: set[str]) -> bool:
+    return any(_metadata_present(requirement, key) for key in keys)
+
+
+def _metadata_has_key(requirement: AtomicRequirement, normalized_key: str) -> bool:
+    if requirement.metadata is None:
+        return False
+    return any(_normalized_metadata_key(key) == normalized_key for key in requirement.metadata)
+
+
+def _normalized_metadata_key(key: str) -> str:
+    return "".join(str(key).lower().replace("-", "_").replace(" ", "_").split("_"))
 
 
 def _metadata_value_in(requirement: AtomicRequirement, key: str, allowed: set[str]) -> bool:

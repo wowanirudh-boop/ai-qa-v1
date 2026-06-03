@@ -20,13 +20,17 @@
       "origin": "source_derived",
       "requirement_id": "req_001",
       "requirement_type": "functional",
+      "metadata": {
+        "collection_mode": "chatbot_collects",
+        "required_entity": "booking_reference"
+      },
       "source_refs": [
         {
           "chunk_id": "chunk_001",
           "document_id": "doc_001"
         }
       ],
-      "statement": "The bot must ask for an order number before showing order status.",
+      "statement": "The bot must ask for a booking reference before showing appointment details.",
       "status": "validated"
     },
     {
@@ -43,7 +47,7 @@
           "document_id": "doc_001"
         }
       ],
-      "statement": "the bot must ask for an order number before showing order status",
+      "statement": "the bot must ask for a booking reference before showing appointment details",
       "status": "duplicate"
     },
     {
@@ -62,7 +66,7 @@
           "document_id": "doc_001"
         }
       ],
-      "statement": "The bot must show order status without asking for an order number.",
+      "statement": "The bot must show appointment details without asking for a booking reference.",
       "status": "conflicting"
     },
     {

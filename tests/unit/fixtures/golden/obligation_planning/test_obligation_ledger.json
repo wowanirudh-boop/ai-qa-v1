@@ -8,7 +8,7 @@
   "obligations": [
     {
       "coverage_intent": "Exercise the documented missing-entity branch without inventing a generic negative case.",
-      "description": "Verify the chatbot asks for the required entity before continuing: The bot must ask for an order number before showing order status.",
+      "description": "Verify the chatbot asks for the required entity before continuing: The bot must ask for a booking reference before showing appointment details.",
       "metadata": {
         "chatbot_obligation": true,
         "planning_rule": "missing_entity_requirement",
@@ -26,12 +26,30 @@
       "status": "planned"
     },
     {
+      "coverage_intent": "Exercise the documented provided-entity path for the chatbot flow.",
+      "description": "Verify the chatbot proceeds when the required entity is provided: The bot must ask for a booking reference before showing appointment details.",
+      "metadata": {
+        "chatbot_obligation": true,
+        "planning_rule": "functional_provided_entity"
+      },
+      "obligation_id": "obl_002",
+      "obligation_type": "provided_entity",
+      "requirement_id": "req_001",
+      "source_refs": [
+        {
+          "chunk_id": "chunk_001",
+          "document_id": "doc_001"
+        }
+      ],
+      "status": "planned"
+    },
+    {
       "blocked_reason": "Conflicting requirement must be resolved before normal obligations can be planned.",
       "metadata": {
         "chatbot_obligation": false,
         "planning_rule": "conflicting_requirement"
       },
-      "obligation_id": "obl_002",
+      "obligation_id": "obl_003",
       "obligation_type": "blocked_conflict",
       "requirement_id": "req_003",
       "source_refs": [

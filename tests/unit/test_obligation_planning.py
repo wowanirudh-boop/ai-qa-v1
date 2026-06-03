@@ -51,12 +51,16 @@ def project_config_data(**overrides: object) -> dict:
 def governed_requirement(**overrides: object) -> dict:
     data = {
         "requirement_id": "req_001",
-        "statement": "The bot must ask for an order number before showing order status.",
+        "statement": "The bot must ask for a booking reference before showing appointment details.",
         "requirement_type": "functional",
         "status": "validated",
         "origin": "source_derived",
         "source_refs": [source_ref()],
         "candidate_ids": ["cand_001"],
+        "metadata": {
+            "required_entity": "booking_reference",
+            "collection_mode": "chatbot_collects",
+        },
     }
     data.update(overrides)
     return data
@@ -143,13 +147,29 @@ def test_plan_obligations_happy_path_writes_obligation_ledger(tmp_path):
                 "source_refs": [source_ref()],
                 "description": (
                     "Verify the chatbot asks for the required entity before continuing: "
-                    "The bot must ask for an order number before showing order status."
+                    "The bot must ask for a booking reference before showing appointment details."
                 ),
                 "coverage_intent": "Exercise the documented missing-entity branch without inventing a generic negative case.",
                 "metadata": {
                     "chatbot_obligation": True,
                     "planning_rule": "missing_entity_requirement",
                     "source_supported_negative": True,
+                },
+            },
+            {
+                "obligation_id": "obl_002",
+                "requirement_id": "req_001",
+                "obligation_type": "provided_entity",
+                "status": "planned",
+                "source_refs": [source_ref()],
+                "description": (
+                    "Verify the chatbot proceeds when the required entity is provided: "
+                    "The bot must ask for a booking reference before showing appointment details."
+                ),
+                "coverage_intent": "Exercise the documented provided-entity path for the chatbot flow.",
+                "metadata": {
+                    "chatbot_obligation": True,
+                    "planning_rule": "functional_provided_entity",
                 },
             },
         ],
@@ -171,8 +191,10 @@ def test_validated_requirement_becomes_planned_obligations():
 
     assert [obligation.obligation_type for obligation in obligation_ledger.obligations] == [
         "missing_entity",
+        "provided_entity",
     ]
     assert [obligation.status for obligation in obligation_ledger.obligations] == [
+        "planned",
         "planned",
     ]
 
@@ -212,7 +234,7 @@ def test_conflicting_requirement_creates_only_blocked_non_normal_obligation():
                 ),
                 governed_requirement(
                     requirement_id="req_002",
-                    statement="The bot must show order status without asking for an order number.",
+                    statement="The bot must show appointment details without asking for a booking reference.",
                     status="conflicting",
                     conflicts_with=["req_001"],
                     source_refs=[source_ref(chunk_id="chunk_002")],
@@ -275,9 +297,9 @@ def test_coverage_policy_affects_obligation_type():
     obligation_ledger = plan_test_obligations(governed, config)
 
     assert [obligation.obligation_type for obligation in obligation_ledger.obligations] == [
-        "skipped_by_policy"
+        "provided_entity"
     ]
-    assert obligation_ledger.obligations[0].status == "skipped_by_policy"
+    assert obligation_ledger.obligations[0].status == "planned"
 
 
 def test_entity_collection_mapping_uses_requirement_type_and_policy():
@@ -287,7 +309,12 @@ def test_entity_collection_mapping_uses_requirement_type_and_policy():
             requirements=[
                 governed_requirement(
                     requirement_type="entity_collection",
-                    metadata={"validation_rules": ["order_id_format"]},
+                    statement="The bot must collect an appointment date before checking availability.",
+                    metadata={
+                        "required_entity": "appointment_date",
+                        "collection_mode": "chatbot_collects",
+                        "entity_format": "ISO date",
+                    },
                 )
             ]
         )
@@ -312,7 +339,8 @@ def test_api_schema_only_requirement_is_skipped_not_planned_chatbot_obligation()
                 governed_requirement(
                     requirement_id="req_schema",
                     requirement_type="response_contract",
-                    statement="The order tracking response includes a top-level success field set to true.",
+                    statement="The backend API response schema includes accountId and planType fields.",
+                    metadata={"backend_only": True, "api_schema_only": True},
                 )
             ]
         )
@@ -342,16 +370,17 @@ def test_generic_positive_negative_obligations_are_not_created_for_every_require
                     requirement_id="req_prompt",
                     requirement_type="intent_handling",
                     statement=(
-                        "When the user intent is \"Track Order\", the bot must prompt: "
-                        "\"I can help with that! Please enter the 10-digit phone number you used to place your order.\""
+                        "When the user intent is \"Check Appointments\", the bot must open the appointment lookup flow."
                     ),
+                    metadata={},
                 ),
                 governed_requirement(
                     requirement_id="req_schema",
                     requirement_type="response_field",
-                    statement="The order details data includes an orderId field.",
+                    statement="The backend API response data object includes accountId and planType fields.",
                     source_refs=[source_ref(chunk_id="chunk_002")],
                     candidate_ids=["cand_002"],
+                    metadata={"backend_only": True},
                 ),
             ],
             governance_summary={
@@ -368,7 +397,7 @@ def test_generic_positive_negative_obligations_are_not_created_for_every_require
 
     obligation_ledger = plan_test_obligations(governed, config)
 
-    assert obligation_types_for_requirement(obligation_ledger, "req_prompt") == ["missing_entity"]
+    assert obligation_types_for_requirement(obligation_ledger, "req_prompt") == ["global_intent"]
     assert obligation_types_for_requirement(obligation_ledger, "req_schema") == ["non_chatbot_api_schema"]
     assert "positive" not in [obligation.obligation_type for obligation in obligation_ledger.obligations]
     assert "negative" not in [obligation.obligation_type for obligation in obligation_ledger.obligations]
@@ -382,9 +411,9 @@ def test_negative_obligation_is_created_for_documented_validation_condition():
                 governed_requirement(
                     requirement_type="validation_constraint",
                     statement=(
-                        "The phoneNumber value must contain numbers only, with no spaces, dashes, "
-                        "or country codes."
+                        "The account code input must contain numbers only, with no spaces or dashes."
                     ),
+                    metadata={},
                 )
             ]
         )
@@ -396,26 +425,31 @@ def test_negative_obligation_is_created_for_documented_validation_condition():
     assert obligation_ledger.obligations[0].metadata["source_supported_negative"] is True
 
 
-def test_phone_number_collection_and_tracking_flow_produce_chatbot_obligations():
+def test_non_order_entity_collection_metadata_produces_chatbot_obligations():
     config = ProjectConfig.from_dict(project_config_data())
     governed = GovernedRequirementLedger.from_dict(
         governed_ledger_data(
             requirements=[
                 governed_requirement(
-                    requirement_id="req_collect_phone",
+                    requirement_id="req_collect_claim_number",
                     requirement_type="entity_collection",
-                    statement="The bot must collect the 10-digit phone number used to place the order.",
-                    metadata={"validation_rules": ["exactly_10_digits", "numbers_only"]},
+                    statement="The bot must collect a claim number before showing claim details.",
+                    metadata={
+                        "required_entity": "claim_number",
+                        "collection_mode": "chatbot_collects",
+                        "entity_format": "three letters followed by six digits",
+                    },
                 ),
                 governed_requirement(
-                    requirement_id="req_track_order",
-                    requirement_type="intent_handling",
-                    statement=(
-                        "When the user intent is \"Track Order\", the bot must prompt: "
-                        "\"I can help with that! Please enter the 10-digit phone number you used to place your order.\""
-                    ),
+                    requirement_id="req_collect_booking_reference",
+                    requirement_type="functional",
+                    statement="The chatbot must ask for a booking reference before retrieving an appointment.",
                     source_refs=[source_ref(chunk_id="chunk_002")],
                     candidate_ids=["cand_002"],
+                    metadata={
+                        "required_entity": "booking_reference",
+                        "collection_mode": "chatbot_collects",
+                    },
                 ),
             ],
             governance_summary={
@@ -432,16 +466,187 @@ def test_phone_number_collection_and_tracking_flow_produce_chatbot_obligations()
 
     obligation_ledger = plan_test_obligations(governed, config)
 
-    assert obligation_types_for_requirement(obligation_ledger, "req_collect_phone") == [
+    assert obligation_types_for_requirement(obligation_ledger, "req_collect_claim_number") == [
         "missing_entity",
         "provided_entity",
         "invalid_entity",
     ]
-    assert obligation_types_for_requirement(obligation_ledger, "req_track_order") == ["missing_entity"]
+    assert obligation_types_for_requirement(obligation_ledger, "req_collect_booking_reference") == [
+        "missing_entity",
+        "provided_entity",
+    ]
     assert all(
         obligation.status == TestObligationStatus.PLANNED
         for obligation in obligation_ledger.obligations
     )
+
+
+def test_required_entity_metadata_creates_entity_obligations_without_domain_terms():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_account_recovery",
+                    requirement_type="functional",
+                    statement="The chatbot must verify the account recovery details before continuing.",
+                    metadata={
+                        "required_entities": ["account_id", "recovery_email"],
+                        "supported_entities": ["account_id", "recovery_email"],
+                        "collection_mode": "chatbot_collects",
+                        "entity_format": "valid email address for recovery_email",
+                    },
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_account_recovery") == [
+        "missing_entity",
+        "provided_entity",
+        "invalid_entity",
+    ]
+
+
+def test_order_id_collection_is_allowed_when_source_supported():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_source_supported_order_id",
+                    requirement_type="functional",
+                    statement="The chatbot must ask for Order ID before checking self-service order updates.",
+                    source_refs=[
+                        source_ref(
+                            chunk_id="chunk_order",
+                            document_id="doc_order",
+                        )
+                    ],
+                    candidate_ids=["cand_order"],
+                    metadata={
+                        "required_entity": "Order ID",
+                        "collection_mode": "chatbot_collects",
+                        "supported_entities": ["Order ID"],
+                    },
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_source_supported_order_id") == [
+        "missing_entity",
+        "provided_entity",
+    ]
+
+
+def test_phone_is_not_globally_required_without_collection_support():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_phone_faq",
+                    requirement_type="functional",
+                    statement="The chatbot should answer whether users can update a phone number in profile settings.",
+                    metadata={},
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_phone_faq") == [
+        "skipped_by_policy"
+    ]
+
+
+def test_phone_collection_does_not_imply_ten_digit_validation():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_callback_phone",
+                    requirement_type="entity_collection",
+                    statement="The chatbot must collect a callback phone number for follow-up.",
+                    metadata={
+                        "required_entity": "callback_phone",
+                        "collection_mode": "chatbot_collects",
+                    },
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_callback_phone") == [
+        "missing_entity",
+        "provided_entity",
+    ]
+    assert "invalid_entity" not in obligation_types_for_requirement(
+        obligation_ledger,
+        "req_callback_phone",
+    )
+    assert "10" not in json.dumps(obligation_ledger.to_dict())
+
+
+def test_user_facing_status_response_is_not_treated_as_api_schema_only():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_claim_status",
+                    requirement_type="response_field",
+                    statement="The chatbot should tell the user the claim status after lookup.",
+                    metadata={"documents_user_facing_bot_behavior": True},
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_claim_status") == ["api_success"]
+
+
+def test_non_order_api_schema_metadata_is_skipped_by_policy():
+    config = ProjectConfig.from_dict(project_config_data())
+    governed = GovernedRequirementLedger.from_dict(
+        governed_ledger_data(
+            requirements=[
+                governed_requirement(
+                    requirement_id="req_claim_schema",
+                    requirement_type="response_contract",
+                    statement=(
+                        "The backend API response schema includes accountId, claimStatus, "
+                        "createdAt, amount, and planType fields."
+                    ),
+                    metadata={
+                        "backend_only": True,
+                        "api_contract": True,
+                        "response_field": "claimStatus",
+                        "field_type": "string",
+                        "nullability": "non_null",
+                    },
+                )
+            ]
+        )
+    )
+
+    obligation_ledger = plan_test_obligations(governed, config)
+
+    assert obligation_types_for_requirement(obligation_ledger, "req_claim_schema") == [
+        "non_chatbot_api_schema"
+    ]
+    assert obligation_ledger.obligations[0].status == TestObligationStatus.SKIPPED_BY_POLICY
 
 
 def test_api_error_mapping_requires_documented_user_facing_bot_behavior():
@@ -453,17 +658,19 @@ def test_api_error_mapping_requires_documented_user_facing_bot_behavior():
                     requirement_id="req_user_facing_error",
                     requirement_type="error_response_mapping",
                     statement=(
-                        "When no active orders are found for the number with HTTP 404 and error code "
-                        "ERR_ORDER_NOT_FOUND, the chatbot standardized output must be "
-                        "\"Order tracking is not available.\""
+                        "When no matching claim is found with HTTP 404 and error code "
+                        "ERR_CLAIM_NOT_FOUND, the chatbot standardized output must be "
+                        "\"I could not find that claim.\""
                     ),
+                    metadata={"documented_errors": ["claim_not_found"]},
                 ),
                 governed_requirement(
                     requirement_id="req_raw_error",
                     requirement_type="api_error_handling",
-                    statement="HTTP 500 with error code ERR_INTERNAL means a database failure occurred.",
+                    statement="HTTP 500 with error code ERR_INTERNAL means an upstream service failure occurred.",
                     source_refs=[source_ref(chunk_id="chunk_002")],
                     candidate_ids=["cand_002"],
+                    metadata={"backend_only": True},
                 ),
             ],
             governance_summary={
@@ -498,10 +705,11 @@ def test_planned_obligations_preserve_requirement_ids_and_source_refs():
                     requirement_id="req_error",
                     requirement_type="api_error_handling",
                     statement=(
-                        "If the order tracking API returns 429, the bot must respond with "
+                        "If the appointment lookup API returns 429, the bot must respond with "
                         "\"I'm having trouble connecting to our system right now.\""
                     ),
                     source_refs=refs,
+                    metadata={"documented_errors": ["rate_limit"]},
                 )
             ]
         )
@@ -677,3 +885,26 @@ def test_c10_implementation_has_no_future_component_or_provider_dependencies():
         "sub" + "process",
     ):
         assert forbidden not in source
+
+
+def test_c10_implementation_has_no_order_tracking_fixture_policy_terms():
+    source = inspect.getsource(obligation_planning).lower()
+
+    forbidden_terms = (
+        "order",
+        "order_id",
+        "orderid",
+        "order number",
+        "tracking",
+        "carrier",
+        "trackinglink",
+        "expecteddeliverydate",
+        "registered phone",
+        "latest order",
+        "no active orders",
+        "email address or order id",
+        "status value",
+        "delivery status",
+    )
+
+    assert [term for term in forbidden_terms if term in source] == []
