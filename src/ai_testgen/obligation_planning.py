@@ -54,6 +54,22 @@ class TestObligationPlanningResult:
     obligation_ledger_path: Path
 
 
+@dataclass(frozen=True)
+class _CoverageSettings:
+    require_positive: bool
+    require_negative: bool
+    require_boundary: bool
+
+
+@dataclass(frozen=True)
+class _ObligationPlan:
+    obligation_type: str
+    planning_rule: str
+    description: str
+    coverage_intent: str
+    source_supported_negative: bool | None = None
+
+
 def plan_obligations_from_governed_ledger_artifact(
     governed_ledger_path: str | Path,
 ) -> TestObligationPlanningResult:
@@ -85,6 +101,7 @@ def plan_test_obligations(
             "GovernedRequirementLedger project_id must match ProjectConfig project_id"
         )
 
+    coverage_settings = _coverage_settings(project_config.coverage_policy)
     obligations: list[dict[str, Any]] = []
     next_obligation_number = 1
     for requirement in governed_ledger.requirements:
@@ -98,6 +115,10 @@ def plan_test_obligations(
                     obligation_type="blocked_conflict",
                     status="blocked_unclear_requirement",
                     blocked_reason=CONFLICT_BLOCKED_REASON,
+                    metadata={
+                        "chatbot_obligation": False,
+                        "planning_rule": "conflicting_requirement",
+                    },
                 )
             )
             next_obligation_number += 1
@@ -105,8 +126,30 @@ def plan_test_obligations(
         if not requirement.is_eligible_for_obligation_planning:
             continue
 
-        obligation_types = _obligation_types_for_requirement(requirement, project_config.coverage_policy)
-        if not obligation_types:
+        if _is_api_schema_only_requirement(requirement):
+            obligations.append(
+                _obligation_data(
+                    requirement,
+                    obligation_number=next_obligation_number,
+                    obligation_type="non_chatbot_api_schema",
+                    status="skipped_by_policy",
+                    blocked_reason="API-schema-only requirement is not a chatbot test obligation by default.",
+                    description=(
+                        "Do not send this API schema detail to chatbot test generation: "
+                        f"{requirement.statement}"
+                    ),
+                    coverage_intent="Keep raw API response-shape coverage out of C11 chatbot test drafting.",
+                    metadata={
+                        "chatbot_obligation": False,
+                        "planning_rule": "api_schema_only_requirement",
+                    },
+                )
+            )
+            next_obligation_number += 1
+            continue
+
+        obligation_plans = _obligation_plans_for_requirement(requirement, coverage_settings)
+        if not obligation_plans:
             obligations.append(
                 _obligation_data(
                     requirement,
@@ -114,18 +157,25 @@ def plan_test_obligations(
                     obligation_type="skipped_by_policy",
                     status="skipped_by_policy",
                     blocked_reason=POLICY_SKIPPED_REASON,
+                    metadata={
+                        "chatbot_obligation": False,
+                        "planning_rule": "no_supported_chatbot_obligation",
+                    },
                 )
             )
             next_obligation_number += 1
             continue
 
-        for obligation_type in obligation_types:
+        for obligation_plan in obligation_plans:
             obligations.append(
                 _obligation_data(
                     requirement,
                     obligation_number=next_obligation_number,
-                    obligation_type=obligation_type,
+                    obligation_type=obligation_plan.obligation_type,
                     status="planned",
+                    description=obligation_plan.description,
+                    coverage_intent=obligation_plan.coverage_intent,
+                    metadata=_planned_obligation_metadata(obligation_plan),
                 )
             )
             next_obligation_number += 1
@@ -154,6 +204,9 @@ def _obligation_data(
     obligation_type: str,
     status: str,
     blocked_reason: str | None = None,
+    description: str | None = None,
+    coverage_intent: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     data = {
         "obligation_id": f"obl_{obligation_number:03d}",
@@ -164,67 +217,274 @@ def _obligation_data(
     }
     if blocked_reason is not None:
         data["blocked_reason"] = blocked_reason
+    if description is not None:
+        data["description"] = description
+    if coverage_intent is not None:
+        data["coverage_intent"] = coverage_intent
+    if metadata is not None:
+        data["metadata"] = metadata
     return data
 
 
-def _obligation_types_for_requirement(
+def _obligation_plans_for_requirement(
     requirement: AtomicRequirement,
-    coverage_policy: dict[str, Any],
-) -> list[str]:
-    require_positive = _coverage_flag(coverage_policy, "require_positive_tests", default=True)
-    require_negative = _coverage_flag(coverage_policy, "require_negative_tests", default=False)
-    require_boundary = _coverage_flag(coverage_policy, "require_boundary_tests", default=False)
-    requirement_type = " ".join(requirement.requirement_type.lower().split())
+    coverage_settings: _CoverageSettings,
+) -> list[_ObligationPlan]:
+    if not (
+        coverage_settings.require_positive
+        or coverage_settings.require_negative
+        or coverage_settings.require_boundary
+    ):
+        return []
 
+    requirement_type = _normalized_requirement_type(requirement)
+    plans: list[_ObligationPlan] = []
     if requirement_type == "entity_collection":
-        obligation_types: list[str] = []
-        if require_negative:
-            obligation_types.append("missing_entity")
-        if require_positive:
-            obligation_types.append("provided_entity")
-        if require_negative and _metadata_present(requirement, "validation_rules"):
-            obligation_types.append("invalid_entity")
-        return obligation_types
-
-    if requirement_type == "business_rule":
-        obligation_types = []
-        if require_positive:
-            obligation_types.append("positive")
-        if require_negative:
-            obligation_types.append("negative")
-        if require_boundary or _metadata_present(requirement, "threshold"):
-            obligation_types.append("boundary")
-        return obligation_types
+        if coverage_settings.require_negative:
+            plans.append(_missing_entity_plan(requirement, "entity_collection"))
+        if coverage_settings.require_positive:
+            plans.append(_provided_entity_plan(requirement, "entity_collection"))
+        if coverage_settings.require_negative and _supports_invalid_entity(requirement):
+            plans.append(_invalid_entity_plan(requirement, "entity_collection_validation"))
+        return _dedupe_plans(plans)
 
     if requirement_type == "faq_answer":
-        obligation_types = []
-        if require_positive:
-            obligation_types.extend(["direct_question", "paraphrase"])
-        if require_negative:
-            obligation_types.append("adjacent_topic_negative")
-        return obligation_types
+        if coverage_settings.require_positive:
+            plans.extend(
+                [
+                    _direct_faq_answer_plan(requirement, "faq_answer_direct"),
+                    _paraphrase_faq_answer_plan(requirement, "faq_answer_paraphrase"),
+                ]
+            )
+        if coverage_settings.require_negative and _supports_adjacent_topic_refusal(requirement):
+            plans.append(_fallback_plan(requirement, "faq_adjacent_topic_refusal"))
+        return _dedupe_plans(plans)
 
-    if requirement_type == "api_behavior":
-        obligation_types = []
-        if require_positive:
-            obligation_types.append("success_response")
-        if require_negative and _metadata_present(requirement, "documented_errors"):
-            obligation_types.append("documented_error_response")
-        if _metadata_truthy(requirement, "timeout_unavailable_documented") or _metadata_truthy(
-            requirement,
-            "timeout_unavailable_approved",
-        ):
-            obligation_types.append("timeout_unavailable")
-        return obligation_types
+    if _is_user_facing_api_error_requirement(requirement):
+        if coverage_settings.require_negative:
+            plans.append(_api_error_plan(requirement, requirement_type))
+        return plans
 
-    obligation_types = []
-    if require_positive:
-        obligation_types.append("positive")
-    if require_negative:
-        obligation_types.append("negative")
-    if require_boundary:
-        obligation_types.append("boundary")
-    return obligation_types
+    if _is_user_facing_api_success_requirement(requirement):
+        if coverage_settings.require_positive:
+            plans.append(_api_success_plan(requirement, requirement_type))
+        return plans
+
+    if _is_input_validation_requirement(requirement):
+        if coverage_settings.require_negative:
+            plans.append(_invalid_entity_plan(requirement, requirement_type))
+        return plans
+
+    if _is_missing_entity_requirement(requirement):
+        if coverage_settings.require_negative:
+            plans.append(_missing_entity_plan(requirement, requirement_type))
+        return plans
+
+    if _is_provided_entity_requirement(requirement):
+        if coverage_settings.require_positive:
+            plans.append(_provided_entity_plan(requirement, requirement_type))
+        return plans
+
+    if _is_human_handoff_requirement(requirement):
+        if coverage_settings.require_positive or coverage_settings.require_negative:
+            plans.append(_human_handoff_plan(requirement, requirement_type))
+        return plans
+
+    if requirement_type in {"intent_handling", "global_intent_handling", "conversation_routing"}:
+        if coverage_settings.require_positive:
+            plans.append(_global_intent_plan(requirement, requirement_type))
+        return plans
+
+    if requirement_type == "fallback_handling":
+        if coverage_settings.require_negative:
+            plans.append(_fallback_plan(requirement, requirement_type))
+        return plans
+
+    if _is_faq_like_requirement(requirement):
+        if coverage_settings.require_positive:
+            plans.append(_direct_faq_answer_plan(requirement, requirement_type))
+        return plans
+
+    if requirement_type == "api_integration":
+        if coverage_settings.require_positive:
+            plans.append(_api_success_plan(requirement, requirement_type))
+        return plans
+
+    if requirement_type == "business_rule" and _metadata_present(requirement, "threshold"):
+        if coverage_settings.require_boundary:
+            plans.append(_boundary_plan(requirement, requirement_type))
+        return plans
+
+    return []
+
+
+def _coverage_settings(coverage_policy: dict[str, Any]) -> _CoverageSettings:
+    return _CoverageSettings(
+        require_positive=_coverage_flag(coverage_policy, "require_positive_tests", default=True),
+        require_negative=_coverage_flag(coverage_policy, "require_negative_tests", default=False),
+        require_boundary=_coverage_flag(coverage_policy, "require_boundary_tests", default=False),
+    )
+
+
+def _planned_obligation_metadata(obligation_plan: _ObligationPlan) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "chatbot_obligation": True,
+        "planning_rule": obligation_plan.planning_rule,
+    }
+    if obligation_plan.source_supported_negative is not None:
+        metadata["source_supported_negative"] = obligation_plan.source_supported_negative
+    return metadata
+
+
+def _missing_entity_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    rule = (
+        "entity_collection_missing_entity"
+        if planning_rule == "entity_collection"
+        else "missing_entity_requirement"
+    )
+    return _ObligationPlan(
+        obligation_type="missing_entity",
+        planning_rule=rule,
+        description=(
+            "Verify the chatbot asks for the required entity before continuing: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise the documented missing-entity branch without inventing a generic negative case.",
+        source_supported_negative=True,
+    )
+
+
+def _provided_entity_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="provided_entity",
+        planning_rule=f"{planning_rule}_provided_entity",
+        description=(
+            "Verify the chatbot proceeds when the required entity is provided: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise the documented provided-entity path for the chatbot flow.",
+    )
+
+
+def _invalid_entity_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="invalid_entity",
+        planning_rule=f"{planning_rule}_invalid_entity",
+        description=(
+            "Verify the chatbot handles the documented invalid entity condition: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a source-backed invalid-input condition only.",
+        source_supported_negative=True,
+    )
+
+
+def _api_success_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="api_success",
+        planning_rule=f"{planning_rule}_api_success",
+        description=(
+            "Verify the chatbot behavior for the documented API-backed success path: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise only user-facing success behavior, not raw API response shape.",
+    )
+
+
+def _api_error_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="api_error",
+        planning_rule=f"{planning_rule}_api_error",
+        description=(
+            "Verify the chatbot behavior for the documented API error condition: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise only documented user-facing API error behavior.",
+        source_supported_negative=True,
+    )
+
+
+def _fallback_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="fallback",
+        planning_rule=f"{planning_rule}_fallback",
+        description=(
+            "Verify the chatbot uses the documented fallback behavior: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a source-backed fallback branch, not a generic negative case.",
+        source_supported_negative=True,
+    )
+
+
+def _human_handoff_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="human_handoff",
+        planning_rule=f"{planning_rule}_human_handoff",
+        description=(
+            "Verify the chatbot performs the documented handoff behavior: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a documented transfer-to-human path.",
+    )
+
+
+def _direct_faq_answer_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="direct_faq_answer",
+        planning_rule=f"{planning_rule}_direct_faq_answer",
+        description=(
+            "Verify the chatbot answers the documented FAQ directly: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise the direct documented FAQ answer.",
+    )
+
+
+def _paraphrase_faq_answer_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="paraphrase_faq_answer",
+        planning_rule=f"{planning_rule}_paraphrase_faq_answer",
+        description=(
+            "Verify the chatbot answers a paraphrased version of the documented FAQ: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a semantically equivalent paraphrase of the documented FAQ.",
+    )
+
+
+def _global_intent_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="global_intent",
+        planning_rule=f"{planning_rule}_global_intent",
+        description=(
+            "Verify the chatbot follows the documented intent branch: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a named source-backed intent path.",
+    )
+
+
+def _boundary_plan(requirement: AtomicRequirement, planning_rule: str) -> _ObligationPlan:
+    return _ObligationPlan(
+        obligation_type="boundary",
+        planning_rule=f"{planning_rule}_boundary",
+        description=(
+            "Verify the documented boundary condition: "
+            f"{requirement.statement}"
+        ),
+        coverage_intent="Exercise a source-backed boundary condition.",
+    )
+
+
+def _dedupe_plans(plans: list[_ObligationPlan]) -> list[_ObligationPlan]:
+    deduped: list[_ObligationPlan] = []
+    seen: set[str] = set()
+    for plan in plans:
+        if plan.obligation_type not in seen:
+            deduped.append(plan)
+            seen.add(plan.obligation_type)
+    return deduped
 
 
 def _coverage_flag(coverage_policy: dict[str, Any], key: str, *, default: bool) -> bool:
@@ -232,6 +492,255 @@ def _coverage_flag(coverage_policy: dict[str, Any], key: str, *, default: bool) 
     if type(value) is not bool:
         raise InvalidTestObligationLedgerError(f"coverage_policy.{key} must be a boolean")
     return value
+
+
+def _normalized_requirement_type(requirement: AtomicRequirement) -> str:
+    return "_".join(requirement.requirement_type.lower().replace("-", "_").split())
+
+
+def _normalized_statement(requirement: AtomicRequirement) -> str:
+    return " ".join(requirement.statement.lower().split())
+
+
+def _is_api_schema_only_requirement(requirement: AtomicRequirement) -> bool:
+    if _metadata_truthy(requirement, "chatbot_testable"):
+        return False
+    if _metadata_truthy(requirement, "api_schema_only") or _metadata_value_in(
+        requirement,
+        "test_track",
+        {"api_contract", "api_schema"},
+    ):
+        return True
+
+    requirement_type = _normalized_requirement_type(requirement)
+    statement = _normalized_statement(requirement)
+    if _documents_user_facing_bot_behavior(statement):
+        return False
+
+    if requirement_type in {
+        "response_contract",
+        "response_field",
+        "functional_response_content",
+        "input_type",
+    }:
+        return True
+    if requirement_type in {
+        "validation_rule",
+        "conditional_validation_rule",
+        "validation_constraint",
+    } and _mentions_api_response_schema(statement):
+        return True
+    if requirement_type in {"api_error_handling", "api_success_handling", "api_behavior"}:
+        return True
+    return False
+
+
+def _documents_user_facing_bot_behavior(statement: str) -> bool:
+    return any(
+        cue in statement
+        for cue in (
+            "bot must respond",
+            "bot should respond",
+            "chatbot must respond",
+            "chatbot should respond",
+            "standardized bot output",
+            "standardized output",
+            "bot output",
+            "must prompt",
+            "should prompt",
+            "must ask",
+            "should ask",
+            "must transfer",
+            "should transfer",
+            "transfer the conversation",
+            "connect you with an agent",
+            "must end the conversation",
+            "should end the conversation",
+            "must say",
+            "should say",
+            "say that",
+            "before responding",
+            "in chat",
+        )
+    )
+
+
+def _mentions_api_response_schema(statement: str) -> bool:
+    if "phone" in statement or "phonenumber" in statement:
+        return False
+    return any(
+        cue in statement
+        for cue in (
+            "response includes",
+            "response field",
+            "top-level success",
+            "data object",
+            "order details data",
+            "orderid field",
+            "carrier value",
+            "trackinglink value",
+            "expecteddeliverydate value",
+            "status value",
+            "must be a string",
+            "url string",
+            "maximum length",
+            "max length",
+            "nullable",
+            "yyyy-mm-dd format",
+            "enum:",
+        )
+    )
+
+
+def _is_user_facing_api_error_requirement(requirement: AtomicRequirement) -> bool:
+    requirement_type = _normalized_requirement_type(requirement)
+    statement = _normalized_statement(requirement)
+    if requirement_type not in {
+        "api_error_handling",
+        "error_response_mapping",
+        "response_behavior",
+    }:
+        return False
+    return _mentions_api_error_condition(statement) and _documents_user_facing_bot_behavior(statement)
+
+
+def _mentions_api_error_condition(statement: str) -> bool:
+    return any(
+        cue in statement
+        for cue in (
+            "api returns",
+            "http 400",
+            "http 401",
+            "http 404",
+            "http 429",
+            "http 500",
+            "err_",
+            "no active orders",
+            "incorrect format",
+            "server rejects",
+            "not found",
+            "rate limit",
+            "unauthorized",
+            "database failure",
+            "upstream service failure",
+        )
+    )
+
+
+def _is_user_facing_api_success_requirement(requirement: AtomicRequirement) -> bool:
+    requirement_type = _normalized_requirement_type(requirement)
+    statement = _normalized_statement(requirement)
+    if requirement_type == "status_response":
+        return _documents_user_facing_bot_behavior(statement)
+    if requirement_type == "api_behavior":
+        return _metadata_truthy(requirement, "documents_user_facing_bot_behavior")
+    return False
+
+
+def _is_input_validation_requirement(requirement: AtomicRequirement) -> bool:
+    requirement_type = _normalized_requirement_type(requirement)
+    if requirement_type in {"input_validation", "validation_constraint"}:
+        return _supports_invalid_entity(requirement)
+    return False
+
+
+def _supports_invalid_entity(requirement: AtomicRequirement) -> bool:
+    if _metadata_present(requirement, "validation_rules") or _metadata_present(requirement, "documented_errors"):
+        return True
+    statement = _normalized_statement(requirement)
+    return ("phone" in statement or "phonenumber" in statement or "input" in statement) and any(
+        cue in statement
+        for cue in (
+            "invalid",
+            "incorrect format",
+            "rejected",
+            "exactly",
+            "digits",
+            "numbers only",
+            "no spaces",
+            "dashes",
+            "country codes",
+            "format",
+            "length",
+        )
+    )
+
+
+def _is_missing_entity_requirement(requirement: AtomicRequirement) -> bool:
+    requirement_type = _normalized_requirement_type(requirement)
+    statement = _normalized_statement(requirement)
+    if requirement_type == "input_parameter" and ("phone" in statement or "phonenumber" in statement):
+        return "required" in statement or "provided" in statement
+    return any(
+        cue in statement
+        for cue in (
+            "ask for",
+            "prompt",
+            "please enter",
+            "collect",
+            "must be provided",
+            "before showing",
+            "before providing",
+            "before continuing",
+        )
+    ) and any(
+        entity in statement
+        for entity in (
+            "phone",
+            "phonenumber",
+            "order number",
+            "order id",
+            "order status",
+        )
+    )
+
+
+def _is_provided_entity_requirement(requirement: AtomicRequirement) -> bool:
+    statement = _normalized_statement(requirement)
+    return (
+        ("provides" in statement or "provide" in statement or "registered phone number" in statement)
+        and ("phone" in statement or "phonenumber" in statement)
+        and ("track" in statement or "delivery status" in statement or "latest order" in statement)
+    )
+
+
+def _is_human_handoff_requirement(requirement: AtomicRequirement) -> bool:
+    statement = _normalized_statement(requirement)
+    return any(
+        cue in statement
+        for cue in (
+            "talk to an agent",
+            "transfer the conversation to a human",
+            "transfer to human",
+            "connect you with an agent",
+            "directed to an agent",
+        )
+    )
+
+
+def _is_faq_like_requirement(requirement: AtomicRequirement) -> bool:
+    statement = _normalized_statement(requirement)
+    return any(
+        cue in statement
+        for cue in (
+            "does not know",
+            "do not know",
+            "don't know",
+            "if the user does not have",
+            "email address or order id",
+        )
+    )
+
+
+def _supports_adjacent_topic_refusal(requirement: AtomicRequirement) -> bool:
+    return _metadata_truthy(requirement, "adjacent_topic_refusal_documented")
+
+
+def _metadata_value_in(requirement: AtomicRequirement, key: str, allowed: set[str]) -> bool:
+    if requirement.metadata is None:
+        return False
+    value = requirement.metadata.get(key)
+    return isinstance(value, str) and value.lower() in allowed
 
 
 def _metadata_present(requirement: AtomicRequirement, key: str) -> bool:

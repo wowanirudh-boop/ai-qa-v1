@@ -1,51 +1,55 @@
 {
   "atomic_ledger_id": "atomic_ledger_001",
   "governance_summary": {
-    "conflicting": 1,
+    "conflicting": 0,
     "duplicate": 0,
     "inferred": 0,
     "needs_clarification": 0,
     "out_of_scope": 0,
     "rejected": 0,
-    "validated": 1
+    "validated": 2
   },
   "governed_ledger_id": "gov_ledger_001",
   "project_id": "demo_chatbot",
   "requirements": [
     {
       "candidate_ids": [
-        "cand_001"
+        "cand_phone"
       ],
+      "metadata": {
+        "chatbot_testable": true
+      },
       "origin": "source_derived",
-      "requirement_id": "req_001",
-      "requirement_type": "functional",
+      "requirement_id": "req_phone",
+      "requirement_type": "status_response",
       "source_refs": [
         {
-          "chunk_id": "chunk_001",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
         }
       ],
-      "statement": "The bot must ask for an order number before showing order status.",
+      "statement": "When the user wants to track an order, the bot must ask for the 10-digit phone number used during checkout and use it for the API-backed status lookup.",
       "status": "validated"
     },
     {
       "candidate_ids": [
-        "cand_002"
+        "cand_api_schema"
       ],
-      "conflicts_with": [
-        "req_001"
-      ],
+      "metadata": {
+        "api_schema_only": true,
+        "chatbot_testable": false
+      },
       "origin": "source_derived",
-      "requirement_id": "req_002",
-      "requirement_type": "functional",
+      "requirement_id": "req_api_schema",
+      "requirement_type": "response_contract",
       "source_refs": [
         {
-          "chunk_id": "chunk_002",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_api_schema",
+          "document_id": "doc_order"
         }
       ],
-      "statement": "The bot may show order status without asking for an order number.",
-      "status": "conflicting"
+      "statement": "The API response data object includes orderId, carrier, status, trackingLink, expectedDeliveryDate, success, and data fields.",
+      "status": "validated"
     }
   ]
 }

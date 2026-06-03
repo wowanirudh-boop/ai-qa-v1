@@ -7,20 +7,15 @@
   "obligation_ledger_id": "obl_ledger_001",
   "obligations": [
     {
+      "coverage_intent": "Exercise the documented missing-entity branch without inventing a generic negative case.",
+      "description": "Verify the chatbot asks for the required entity before continuing: The bot must ask for an order number before showing order status.",
+      "metadata": {
+        "chatbot_obligation": true,
+        "planning_rule": "missing_entity_requirement",
+        "source_supported_negative": true
+      },
       "obligation_id": "obl_001",
-      "obligation_type": "positive",
-      "requirement_id": "req_001",
-      "source_refs": [
-        {
-          "chunk_id": "chunk_001",
-          "document_id": "doc_001"
-        }
-      ],
-      "status": "planned"
-    },
-    {
-      "obligation_id": "obl_002",
-      "obligation_type": "negative",
+      "obligation_type": "missing_entity",
       "requirement_id": "req_001",
       "source_refs": [
         {
@@ -32,7 +27,11 @@
     },
     {
       "blocked_reason": "Conflicting requirement must be resolved before normal obligations can be planned.",
-      "obligation_id": "obl_003",
+      "metadata": {
+        "chatbot_obligation": false,
+        "planning_rule": "conflicting_requirement"
+      },
+      "obligation_id": "obl_002",
       "obligation_type": "blocked_conflict",
       "requirement_id": "req_003",
       "source_refs": [

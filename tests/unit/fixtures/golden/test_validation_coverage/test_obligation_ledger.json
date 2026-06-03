@@ -3,29 +3,42 @@
   "obligation_ledger_id": "obl_ledger_001",
   "obligations": [
     {
-      "obligation_id": "obl_001",
-      "obligation_type": "positive",
-      "requirement_id": "req_001",
+      "coverage_intent": "Exercise user-facing API success behavior, not raw API response shape.",
+      "description": "Verify successful order tracking after the user provides a valid 10-digit phone number.",
+      "metadata": {
+        "chatbot_obligation": true,
+        "planning_rule": "status_response_api_success",
+        "required_entity": "phoneNumber"
+      },
+      "obligation_id": "obl_phone_success",
+      "obligation_type": "api_success",
+      "requirement_id": "req_phone",
       "source_refs": [
         {
-          "chunk_id": "chunk_001",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
         }
       ],
       "status": "planned"
     },
     {
-      "blocked_reason": "Conflicting requirement must be resolved before testing.",
-      "obligation_id": "obl_002",
-      "obligation_type": "blocked_conflict",
-      "requirement_id": "req_002",
+      "blocked_reason": "API-schema-only requirement is not a chatbot test obligation by default.",
+      "coverage_intent": "Keep raw API response-shape coverage out of chatbot test drafting.",
+      "description": "Do not send this API schema detail to chatbot test generation.",
+      "metadata": {
+        "chatbot_obligation": false,
+        "planning_rule": "api_schema_only_requirement"
+      },
+      "obligation_id": "obl_api_schema",
+      "obligation_type": "non_chatbot_api_schema",
+      "requirement_id": "req_api_schema",
       "source_refs": [
         {
-          "chunk_id": "chunk_002",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_api_schema",
+          "document_id": "doc_order"
         }
       ],
-      "status": "blocked_unclear_requirement"
+      "status": "skipped_by_policy"
     }
   ],
   "project_id": "demo_chatbot"

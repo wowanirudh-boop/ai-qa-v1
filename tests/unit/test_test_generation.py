@@ -29,6 +29,32 @@ def source_ref(chunk_id: str = "chunk_001", document_id: str = "doc_001") -> dic
     return {"document_id": document_id, "chunk_id": chunk_id}
 
 
+def source_chunk(**overrides: object) -> dict:
+    data = {
+        "chunk_id": "chunk_001",
+        "document_id": "doc_001",
+        "sequence": 1,
+        "text": 'BOT: "I can help with that! Please enter the 10-digit phone number you used to place your order."',
+        "checksum": "sha256:chunk001",
+        "processing_status": "not_processed",
+        "location": "Bot Flow.md:6",
+    }
+    data.update(overrides)
+    return data
+
+
+def source_package_data(**overrides: object) -> dict:
+    data = {
+        "source_package_id": "source_pkg_001",
+        "project_id": "demo_chatbot",
+        "document_ids": ["doc_001"],
+        "chunks": [source_chunk()],
+        "checksum": "sha256:source-package",
+    }
+    data.update(overrides)
+    return data
+
+
 def governed_requirement(**overrides: object) -> dict:
     data = {
         "requirement_id": "req_001",
@@ -70,6 +96,11 @@ def obligation_data(**overrides: object) -> dict:
         "obligation_type": "positive",
         "status": "planned",
         "description": "Verify order status is not provided before an order number is collected.",
+        "coverage_intent": "Exercise the documented provided-entity path for the chatbot flow.",
+        "metadata": {
+            "chatbot_obligation": True,
+            "planning_rule": "provided_entity_requirement_provided_entity",
+        },
         "source_refs": [source_ref()],
     }
     data.update(overrides)
@@ -222,6 +253,16 @@ def write_obligation_ledger(store: ArtifactStore, *, data: dict | None = None):
     )
 
 
+def write_source_package(store: ArtifactStore, *, data: dict | None = None):
+    return store.write_json(
+        "demo_chatbot",
+        "run_001",
+        "02_source_package",
+        "source_package",
+        data or source_package_data(),
+    )
+
+
 def write_project_config(store: ArtifactStore, *, metadata: dict | None = None):
     return store.write_json(
         "demo_chatbot",
@@ -300,6 +341,118 @@ def test_generate_tests_happy_path_invokes_skill_runtime_and_writes_artifacts(tm
     assert SkillRunRecord.from_dict(json.loads(run_record_path.read_text(encoding="utf-8"))) == (
         result.skill_run_records[0]
     )
+
+
+def test_c11_work_packets_include_obligation_requirement_and_source_context(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    requirement = governed_requirement(
+        statement="The bot must prompt for the checkout phone number before tracking an order.",
+        requirement_type="entity_collection",
+        metadata={"entity": "phoneNumber", "chatbot_testable": True},
+    )
+    obligation = obligation_data(
+        obligation_id="obl_001",
+        requirement_id="req_001",
+        obligation_type="provided_entity",
+        description="Verify the chatbot proceeds when the user provides the required phoneNumber.",
+        coverage_intent="Exercise self-service order tracking with phoneNumber, not order ID.",
+        metadata={
+            "chatbot_obligation": True,
+            "planning_rule": "entity_collection_provided_entity",
+            "required_entity": "phoneNumber",
+        },
+    )
+    chunk = source_chunk(
+        text=(
+            'BOT: "I can help with that! Please enter the 10-digit phone number '
+            'you used to place your order."'
+        )
+    )
+    write_governed_ledger(store, data=governed_ledger_data(requirements=[requirement]))
+    write_source_package(store, data=source_package_data(chunks=[chunk]))
+    obligation_artifact = write_obligation_ledger(
+        store,
+        data=obligation_ledger_data(obligations=[obligation]),
+    )
+    writer_output = draft_suite_data(test_cases=[draft_test_case_data(assertions=[])])
+    runtime, adapter = runtime_with_adapter(artifact_root, writer_output)
+
+    result = generate_tests_from_obligation_ledger_artifact(
+        obligation_artifact.path,
+        writer_skill_definition(),
+        oracle_generator_skill_definition(),
+        skill_runtime=runtime,
+    )
+
+    writer_input = adapter.calls[0][1][0]
+    assert writer_input.obligations[0].to_dict() == obligation
+    assert writer_input.metadata == {
+        "linked_requirements": [requirement],
+        "linked_source_chunks": [chunk],
+    }
+
+    oracle_input = adapter.calls[1][1][0]
+    assert oracle_input.metadata == {
+        "linked_obligations": [obligation],
+        "linked_requirements": [requirement],
+        "linked_source_chunks": [chunk],
+    }
+    assert result.draft_suite.test_cases[0].requirement_ids == ["req_001"]
+    assert result.draft_suite.test_cases[0].obligation_ids == ["obl_001"]
+    assert result.draft_suite.test_cases[0].source_refs[0].to_dict() == source_ref()
+
+
+def test_c11_filters_to_planned_obligations_before_skill_runtime(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    store = ArtifactStore(artifact_root)
+    planned_requirement = governed_requirement()
+    skipped_requirement = governed_requirement(
+        requirement_id="req_002",
+        statement="The API response data object contains orderId.",
+        requirement_type="response_field",
+        source_refs=[source_ref(chunk_id="chunk_002")],
+        candidate_ids=["cand_002"],
+    )
+    planned_obligation = obligation_data()
+    skipped_obligation = obligation_data(
+        obligation_id="obl_002",
+        requirement_id="req_002",
+        obligation_type="non_chatbot_api_schema",
+        status="skipped_by_policy",
+        description="Do not send this API schema detail to chatbot test generation.",
+        coverage_intent="Keep raw API response-shape coverage out of C11 chatbot test drafting.",
+        blocked_reason="API-schema-only requirement is not a chatbot test obligation by default.",
+        metadata={
+            "chatbot_obligation": False,
+            "planning_rule": "api_schema_only_requirement",
+        },
+        source_refs=[source_ref(chunk_id="chunk_002")],
+    )
+    write_governed_ledger(
+        store,
+        data=governed_ledger_data(requirements=[planned_requirement, skipped_requirement]),
+    )
+    obligation_artifact = write_obligation_ledger(
+        store,
+        data=obligation_ledger_data(obligations=[planned_obligation, skipped_obligation]),
+    )
+    writer_output = draft_suite_data(test_cases=[draft_test_case_data(assertions=[])])
+    runtime, adapter = runtime_with_adapter(artifact_root, writer_output)
+
+    result = generate_tests_from_obligation_ledger_artifact(
+        obligation_artifact.path,
+        writer_skill_definition(),
+        oracle_generator_skill_definition(),
+        skill_runtime=runtime,
+    )
+
+    writer_input = adapter.calls[0][1][0]
+    assert [obligation.obligation_id for obligation in writer_input.obligations] == ["obl_001"]
+    assert writer_input.metadata == {"linked_requirements": [planned_requirement]}
+    assert result.draft_suite.test_cases[0].requirement_ids == ["req_001"]
+    assert result.draft_suite.test_cases[0].obligation_ids == ["obl_001"]
+    assert result.draft_suite.test_cases[0].source_refs[0].to_dict() == source_ref()
 
 
 def test_generate_tests_uses_project_configured_codex_cli_adapter(tmp_path, monkeypatch):
@@ -699,6 +852,7 @@ def test_c11_writes_no_future_component_artifacts(tmp_path):
         "demo_chatbot/run_001/05_governed_requirements/governed_requirement_ledger.json",
         "demo_chatbot/run_001/06_test_obligations/test_obligation_ledger.json",
         "demo_chatbot/run_001/07_draft_tests/draft_test_suite.json",
+        "demo_chatbot/run_001/07_draft_tests/draft_test_suite_oracle_input.json",
         "demo_chatbot/run_001/07_draft_tests/draft_test_suite_oracle_output.json",
         "demo_chatbot/run_001/07_draft_tests/draft_test_suite_skill_output.json",
         "demo_chatbot/run_001/07_draft_tests/test_generation_input.json",
@@ -711,13 +865,13 @@ def test_c11_implementation_has_no_future_component_raw_document_or_provider_dep
     source = inspect.getsource(test_generation)
 
     for forbidden in (
-        "SourcePackage",
-        "SourceChunk",
         "CandidateRequirementPackage",
         "AtomicRequirementLedger",
         "ValidatedTestSuite",
         "CoverageReport",
         "ExecutorExportPackage",
+        "source_paths",
+        "read_text",
         "op" + "enai",
         "anth" + "ropic",
         "lang" + "chain",

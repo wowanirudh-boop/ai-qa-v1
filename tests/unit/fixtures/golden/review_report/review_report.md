@@ -13,28 +13,28 @@ Project: demo_chatbot
 
 | Status | Count |
 |---|---:|
-| conflicting | 1 |
+| conflicting | 0 |
 | duplicate | 0 |
 | inferred | 0 |
 | needs_clarification | 0 |
 | out_of_scope | 0 |
 | rejected | 0 |
-| validated | 1 |
+| validated | 2 |
 
 ## Obligation Status
 
 | Status | Count |
 |---|---:|
-| blocked_unclear_requirement | 1 |
 | planned | 1 |
+| skipped_by_policy | 1 |
 
 ## Validation Summary
 
 | Status | Count |
 |---|---:|
 | export_eligible | 1 |
-| needs_review | 1 |
-| rejected | 1 |
+| needs_review | 4 |
+| rejected | 0 |
 | valid | 1 |
 
 ## Coverage Summary
@@ -44,16 +44,17 @@ Project: demo_chatbot
 | Metric | Count |
 |---|---:|
 | covered | 1 |
+| skipped | 1 |
 | total | 2 |
-| uncovered | 1 |
+| uncovered | 0 |
 
 ### Obligations
 
 | Metric | Count |
 |---|---:|
-| blocked | 1 |
+| blocked | 0 |
 | covered | 1 |
-| skipped | 0 |
+| skipped | 1 |
 | total | 2 |
 | uncovered | 0 |
 
@@ -62,9 +63,9 @@ Project: demo_chatbot
 | Metric | Count |
 |---|---:|
 | export_eligible | 1 |
-| needs_review | 1 |
-| rejected | 1 |
-| total | 3 |
+| needs_review | 4 |
+| rejected | 0 |
+| total | 5 |
 | valid | 1 |
 
 ### Source Chunks
@@ -72,19 +73,20 @@ Project: demo_chatbot
 | Metric | Count |
 |---|---:|
 | covered | 1 |
-| total | 3 |
-| uncovered | 1 |
+| skipped | 1 |
+| total | 2 |
+| uncovered | 0 |
 | with_requirements | 2 |
-| without_requirements | 1 |
+| without_requirements | 0 |
 
 ## Coverage Gaps
 
-- Uncovered requirements: req_002
+- Uncovered requirements: none
 - Uncovered obligations: none
 
 ## Conflicts
 
-- req_002: The bot may show order status without asking for an order number. Conflicts with: req_001
+- None
 
 ## Approval Needed
 
@@ -92,9 +94,11 @@ Project: demo_chatbot
 
 ## Blocked Obligations
 
-- obl_002 (blocked_unclear_requirement) for req_002: Conflicting requirement must be resolved before testing.
+- None
 
 ## Rejected or Non-Exportable Tests
 
-- tc_002 (rejected, export_eligible=False): Unknown obligation is rejected. Reasons: unknown obligation obl_missing
-- tc_003 (needs_review, export_eligible=False): Conflicting order status path needs review. Reasons: conflicting requirement req_002; non-exportable obligation obl_002
+- tc_002 (needs_review, export_eligible=False): Unsupported order ID self-service tracking. Reasons: unsupported entity collection; invalid required entity test data; missing API setup or stub data
+- tc_003 (needs_review, export_eligible=False): Raw API response shown as chatbot output. Reasons: raw API JSON bot turn
+- tc_004 (needs_review, export_eligible=False): Placeholder order status response. Reasons: unresolved executable placeholder; invalid required entity test data
+- tc_005 (needs_review, export_eligible=False): Traceability-only order tracking assertion. Reasons: weak or meta-level assertion

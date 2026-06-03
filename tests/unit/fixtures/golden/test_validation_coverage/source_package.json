@@ -1,31 +1,24 @@
 {
-  "checksum": "sha256:pkg001",
+  "checksum": "sha256:source-pkg-order",
   "chunks": [
     {
-      "checksum": "sha256:chunk001",
-      "chunk_id": "chunk_001",
-      "document_id": "doc_001",
+      "checksum": "sha256:chunk-phone",
+      "chunk_id": "chunk_phone",
+      "document_id": "doc_order",
       "processing_status": "requirements_extracted",
-      "text": "The bot must ask for an order number before showing order status."
+      "text": "When the user wants to track an order, the bot asks for the 10-digit phone number used during checkout. If the tracking API returns 200 OK, the bot tells the user the delivery status for the latest active order. The test fixture registers phone 5551234567 and stubs the order tracking API to return a SHIPPED status."
     },
     {
-      "checksum": "sha256:chunk002",
-      "chunk_id": "chunk_002",
-      "document_id": "doc_001",
+      "checksum": "sha256:chunk-api-schema",
+      "chunk_id": "chunk_api_schema",
+      "document_id": "doc_order",
       "processing_status": "requirements_extracted",
-      "text": "The bot may show order status without asking for an order number."
-    },
-    {
-      "checksum": "sha256:chunk003",
-      "chunk_id": "chunk_003",
-      "document_id": "doc_001",
-      "processing_status": "non_testable_context",
-      "text": "Background support policy context."
+      "text": "The API response body contains success, data, orderId, carrier, trackingLink, expectedDeliveryDate, status, type, maxLength, required, and nullability fields for the API contract."
     }
   ],
   "document_ids": [
-    "doc_001"
+    "doc_order"
   ],
   "project_id": "demo_chatbot",
-  "source_package_id": "source_pkg_001"
+  "source_package_id": "source_pkg_order"
 }

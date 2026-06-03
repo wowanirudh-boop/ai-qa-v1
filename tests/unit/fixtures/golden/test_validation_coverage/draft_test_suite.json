@@ -7,31 +7,51 @@
       "assertions": [
         {
           "assertion_id": "assert_001",
-          "assertion_type": "bot_response_contains_request",
-          "expected": "The bot asks for the order number before providing status.",
+          "assertion_type": "bot_response_behavior",
+          "expected": "The bot provides the delivery status for the latest active order for phone 5551234567.",
           "target": "bot.final_response"
         }
       ],
       "obligation_ids": [
-        "obl_001"
+        "obl_phone_success"
       ],
       "requirement_ids": [
-        "req_001"
+        "req_phone"
       ],
       "source_refs": [
         {
-          "chunk_id": "chunk_001",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
         }
       ],
       "status": "draft",
       "test_case_id": "tc_001",
-      "title": "Order status requires order number",
+      "title": "Track order by checkout phone",
       "turns": [
         {
-          "speaker": "user",
-          "text": "Where is my order?",
+          "speaker": "system",
+          "text": "Setup: API stub has registered phone 5551234567 and returns 200 OK with SHIPPED status.",
           "turn_id": "turn_001"
+        },
+        {
+          "speaker": "user",
+          "text": "Track my order.",
+          "turn_id": "turn_002"
+        },
+        {
+          "speaker": "bot",
+          "text": "Please enter the 10-digit phone number used during checkout.",
+          "turn_id": "turn_003"
+        },
+        {
+          "speaker": "user",
+          "text": "5551234567",
+          "turn_id": "turn_004"
+        },
+        {
+          "speaker": "bot",
+          "text": "Your latest active order is currently shipped and on its way.",
+          "turn_id": "turn_005"
         }
       ]
     },
@@ -39,31 +59,46 @@
       "assertions": [
         {
           "assertion_id": "assert_001",
-          "assertion_type": "bot_response_contains_request",
-          "expected": "The bot asks for the order number before providing status.",
+          "assertion_type": "bot_response_behavior",
+          "expected": "The bot provides the delivery status for the latest active order for phone 5551234567.",
           "target": "bot.final_response"
         }
       ],
       "obligation_ids": [
-        "obl_missing"
+        "obl_phone_success"
       ],
       "requirement_ids": [
-        "req_001"
+        "req_phone"
       ],
       "source_refs": [
         {
-          "chunk_id": "chunk_001",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
         }
       ],
       "status": "draft",
       "test_case_id": "tc_002",
-      "title": "Unknown obligation is rejected",
+      "title": "Unsupported order ID self-service tracking",
       "turns": [
         {
           "speaker": "user",
-          "text": "Where is my order?",
+          "text": "Track my order.",
           "turn_id": "turn_001"
+        },
+        {
+          "speaker": "bot",
+          "text": "Please provide your Order ID.",
+          "turn_id": "turn_002"
+        },
+        {
+          "speaker": "user",
+          "text": "ORD-1001",
+          "turn_id": "turn_003"
+        },
+        {
+          "speaker": "bot",
+          "text": "I found your order and it is shipped.",
+          "turn_id": "turn_004"
         }
       ]
     },
@@ -71,31 +106,135 @@
       "assertions": [
         {
           "assertion_id": "assert_001",
-          "assertion_type": "bot_response_contains_request",
-          "expected": "The bot may show order status without an order number.",
+          "assertion_type": "bot_response_behavior",
+          "expected": "The bot provides the delivery status for the latest active order for phone 5551234567.",
           "target": "bot.final_response"
         }
       ],
       "obligation_ids": [
-        "obl_002"
+        "obl_phone_success"
       ],
       "requirement_ids": [
-        "req_002"
+        "req_phone"
       ],
       "source_refs": [
         {
-          "chunk_id": "chunk_002",
-          "document_id": "doc_001"
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
         }
       ],
       "status": "draft",
       "test_case_id": "tc_003",
-      "title": "Conflicting order status path needs review",
+      "title": "Raw API response shown as chatbot output",
       "turns": [
         {
-          "speaker": "user",
-          "text": "Can you show my order status?",
+          "speaker": "system",
+          "text": "Setup: API stub has registered phone 5551234567 and returns 200 OK with SHIPPED status.",
           "turn_id": "turn_001"
+        },
+        {
+          "speaker": "user",
+          "text": "Track my order using 5551234567.",
+          "turn_id": "turn_002"
+        },
+        {
+          "speaker": "bot",
+          "text": "{\"success\": true, \"data\": {\"carrier\": \"UPS\", \"status\": \"SHIPPED\"}}",
+          "turn_id": "turn_003"
+        }
+      ]
+    },
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "bot_response_behavior",
+          "expected": "The bot provides <most_recent_active_order_status> for [PHONE].",
+          "target": "bot.final_response"
+        }
+      ],
+      "obligation_ids": [
+        "obl_phone_success"
+      ],
+      "requirement_ids": [
+        "req_phone"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
+        }
+      ],
+      "status": "draft",
+      "test_case_id": "tc_004",
+      "title": "Placeholder order status response",
+      "turns": [
+        {
+          "speaker": "system",
+          "text": "Setup: API stub has registered phone [PHONE] and returns 200 OK.",
+          "turn_id": "turn_001"
+        },
+        {
+          "speaker": "user",
+          "text": "Track my order using [PHONE].",
+          "turn_id": "turn_002"
+        },
+        {
+          "speaker": "bot",
+          "text": "Your latest active order status is <most_recent_active_order_status>.",
+          "turn_id": "turn_003"
+        }
+      ]
+    },
+    {
+      "assertions": [
+        {
+          "assertion_id": "assert_001",
+          "assertion_type": "traceability",
+          "expected": "Traceability is maintained and the requirement is covered.",
+          "target": "test_case_links"
+        }
+      ],
+      "obligation_ids": [
+        "obl_phone_success"
+      ],
+      "requirement_ids": [
+        "req_phone"
+      ],
+      "source_refs": [
+        {
+          "chunk_id": "chunk_phone",
+          "document_id": "doc_order"
+        }
+      ],
+      "status": "draft",
+      "test_case_id": "tc_005",
+      "title": "Traceability-only order tracking assertion",
+      "turns": [
+        {
+          "speaker": "system",
+          "text": "Setup: API stub has registered phone 5551234567 and returns 200 OK with SHIPPED status.",
+          "turn_id": "turn_001"
+        },
+        {
+          "speaker": "user",
+          "text": "Track my order.",
+          "turn_id": "turn_002"
+        },
+        {
+          "speaker": "bot",
+          "text": "Please enter the 10-digit phone number used during checkout.",
+          "turn_id": "turn_003"
+        },
+        {
+          "speaker": "user",
+          "text": "5551234567",
+          "turn_id": "turn_004"
+        },
+        {
+          "speaker": "bot",
+          "text": "Your latest active order is currently shipped and on its way.",
+          "turn_id": "turn_005"
         }
       ]
     }

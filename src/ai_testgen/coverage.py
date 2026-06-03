@@ -60,6 +60,7 @@ def build_coverage_report(
         for obligation in obligations.obligations
         if obligation.status == TestObligationStatus.REJECTED
     }
+    skipped_requirement_ids = _skipped_requirement_ids(governed.requirements, obligations.obligations)
 
     requirement_ids = [requirement.requirement_id for requirement in governed.requirements]
     obligation_ids = [obligation.obligation_id for obligation in obligations.obligations]
@@ -67,6 +68,7 @@ def build_coverage_report(
         requirement_id
         for requirement_id in requirement_ids
         if requirement_id not in covered_requirement_ids
+        and requirement_id not in skipped_requirement_ids
     ]
     uncovered_obligation_ids = [
         obligation_id
@@ -96,10 +98,13 @@ def build_coverage_report(
         "test_counts": _test_counts(suite.test_cases),
         "source_chunk_counts": _source_chunk_counts(
             governed.requirements,
+            obligations.obligations,
             suite.test_cases,
             sources,
         ),
     }
+    if skipped_requirement_ids:
+        data["requirement_counts"]["skipped"] = len(skipped_requirement_ids)
     if uncovered_requirement_ids:
         data["uncovered_requirement_ids"] = uncovered_requirement_ids
     if uncovered_obligation_ids:
@@ -152,6 +157,7 @@ def _test_counts(test_cases: list[TestCase]) -> dict[str, int]:
 
 def _source_chunk_counts(
     requirements: list[AtomicRequirement],
+    obligations: list[TestObligation],
     test_cases: list[TestCase],
     source_package: SourcePackage | None,
 ) -> dict[str, int]:
@@ -165,9 +171,16 @@ def _source_chunk_counts(
         }
 
     chunk_ids = {chunk.chunk_id for chunk in source_package.chunks}
+    skipped_requirement_ids = _skipped_requirement_ids(requirements, obligations)
     requirement_chunk_ids = _chunk_ids_from_source_refs(
         source_ref
         for requirement in requirements
+        for source_ref in (requirement.source_refs or [])
+    )
+    skipped_chunk_ids = _chunk_ids_from_source_refs(
+        source_ref
+        for requirement in requirements
+        if requirement.requirement_id in skipped_requirement_ids
         for source_ref in (requirement.source_refs or [])
     )
     covered_chunk_ids = _chunk_ids_from_source_refs(
@@ -178,14 +191,18 @@ def _source_chunk_counts(
     )
     requirement_chunk_ids &= chunk_ids
     covered_requirement_chunk_ids = covered_chunk_ids & requirement_chunk_ids
+    skipped_requirement_chunk_ids = (skipped_chunk_ids & requirement_chunk_ids) - covered_requirement_chunk_ids
 
-    return {
+    counts = {
         "total": len(chunk_ids),
         "with_requirements": len(requirement_chunk_ids),
         "covered": len(covered_requirement_chunk_ids),
-        "uncovered": len(requirement_chunk_ids - covered_requirement_chunk_ids),
+        "uncovered": len(requirement_chunk_ids - covered_requirement_chunk_ids - skipped_requirement_chunk_ids),
         "without_requirements": len(chunk_ids - requirement_chunk_ids),
     }
+    if skipped_requirement_chunk_ids:
+        counts["skipped"] = len(skipped_requirement_chunk_ids)
+    return counts
 
 
 def _chunk_ids_from_source_refs(source_refs: Iterable[SourceRef]) -> set[str]:
@@ -194,3 +211,27 @@ def _chunk_ids_from_source_refs(source_refs: Iterable[SourceRef]) -> set[str]:
         for source_ref in source_refs
         if source_ref.chunk_id is not None
     }
+
+
+def _skipped_requirement_ids(
+    requirements: list[AtomicRequirement],
+    obligations: list[TestObligation],
+) -> set[str]:
+    obligations_by_requirement_id: dict[str, list[TestObligation]] = {}
+    for obligation in obligations:
+        obligations_by_requirement_id.setdefault(obligation.requirement_id, []).append(obligation)
+
+    skipped: set[str] = set()
+    for requirement in requirements:
+        linked_obligations = obligations_by_requirement_id.get(requirement.requirement_id, [])
+        if linked_obligations and all(_is_skipped_chatbot_obligation(obligation) for obligation in linked_obligations):
+            skipped.add(requirement.requirement_id)
+    return skipped
+
+
+def _is_skipped_chatbot_obligation(obligation: TestObligation) -> bool:
+    return (
+        obligation.status == TestObligationStatus.SKIPPED_BY_POLICY
+        or obligation.obligation_type == "non_chatbot_api_schema"
+        or bool(obligation.metadata and obligation.metadata.get("chatbot_obligation") is False)
+    )

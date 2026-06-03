@@ -111,11 +111,11 @@ def test_review_report_artifact_entrypoint_writes_report_and_metadata(tmp_path):
         "review_report_id": "review_001",
         "summary": {
             "approval_needed_requirements": 0,
-            "blocked_obligations": 1,
-            "non_exportable_tests": 2,
-            "rejected_tests": 1,
+            "blocked_obligations": 0,
+            "non_exportable_tests": 4,
+            "rejected_tests": 0,
             "uncovered_obligations": 0,
-            "uncovered_requirements": 1,
+            "uncovered_requirements": 0,
         },
         "validated_suite_id": "validated_suite_001",
     }
@@ -133,10 +133,10 @@ def test_report_includes_coverage_summary_rejected_and_blocked_items(tmp_path):
     result = generate_review_report_from_validated_suite_artifact(validated.path)
     report = result.report_path.read_text(encoding="utf-8")
 
-    assert "| uncovered | 1 |" in report
-    assert "obl_002 (blocked_unclear_requirement) for req_002" in report
-    assert "tc_002 (rejected, export_eligible=False): Unknown obligation is rejected." in report
-    assert "tc_003 (needs_review, export_eligible=False): Conflicting order status path needs review." in report
+    assert "| skipped | 1 |" in report
+    assert "## Blocked Obligations\n\n- None" in report
+    assert "tc_002 (needs_review, export_eligible=False): Unsupported order ID self-service tracking." in report
+    assert "tc_003 (needs_review, export_eligible=False): Raw API response shown as chatbot output." in report
 
 
 def test_missing_coverage_report_artifact_is_reported(tmp_path):

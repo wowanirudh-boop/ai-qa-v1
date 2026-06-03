@@ -89,6 +89,9 @@ def test_test_case_writer_skill_definition_includes_required_rules():
         "draft chatbot test cases from bounded test obligations",
         "Return JSON only",
         "Read only the provided bounded TestObligationLedger",
+        "Treat generated tests as chatbot conversation tests, not API-contract tests",
+        "Use obligation.description, obligation.coverage_intent, and obligation.metadata as primary generation guidance when present",
+        "Preserve requirement_ids, obligation_ids, and source_refs exactly from the input",
         "Do not read raw source documents",
         "Do not create requirements",
         "Do not create obligations",
@@ -98,6 +101,21 @@ def test_test_case_writer_skill_definition_includes_required_rules():
         "Every test case must have non-empty obligation_ids",
         "Every obligation_id must come from the input TestObligationLedger",
         "Preserve source_refs from linked obligations",
+        "Bot turns must be actual chatbot utterances, not descriptions",
+        "Do not output raw API JSON as bot text unless the source explicitly says the chatbot displays raw JSON",
+        "Do not invent unsupported user journeys",
+        "self-service tracking must use phoneNumber",
+        "do not use order ID/order number for self-service tracking",
+        "Do not use placeholders or unresolved variables in executable fields",
+        "<registered_checkout_phone_number>",
+        "GLOBAL_INTENT_UTTERANCE",
+        "{formattedDate}",
+        "Positive phone-number paths must use valid source/config-supported phone data",
+        "If no concrete valid phone/API fixture exists, do not fabricate data",
+        "Use exact documented bot wording when the source provides exact wording",
+        "Do not invent exact wording when the source only describes behavior",
+        "Include clear preconditions/setup when API state, API stubbing, customer/order data, or human handoff state is required",
+        "If the obligation lacks enough information for an executable test, do not fabricate missing data",
     ]
 
     for phrase in required_phrases:
@@ -127,6 +145,15 @@ def test_oracle_generator_skill_definition_includes_required_rules():
         "Do not decide export eligibility",
         "Preserve test_case_id, requirement_ids, obligation_ids, source_refs, title, status, and conversation turns",
         "Assertions must be specific enough for a validator or reviewer to evaluate",
+        "Assertions must evaluate observable chatbot behavior, not traceability metadata alone",
+        "Assertions must not pass merely by checking requirement_ids, obligation_ids, or source_refs",
+        "Assertions must include concrete pass/fail criteria",
+        "Assertions must identify required facts and prohibited unsupported claims",
+        "Assertions must not bless unsupported draft turns",
+        "Assertions must not require exact wording unless the source requires exact wording",
+        "If a draft test contains placeholders, raw JSON bot output, unsupported order-ID flow, or descriptive bot turns, flag the issue",
+        "Ground assertions in linked requirement, obligation, source refs, source text, and obligation metadata where available",
+        "Distinguish bot-visible behavior, API setup/stub behavior, executor preconditions, and internal traceability metadata",
     ]
 
     for phrase in required_phrases:

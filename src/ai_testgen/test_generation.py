@@ -17,6 +17,7 @@ from ai_testgen.schemas import (
     SchemaValidationError,
     SkillDefinition,
     SkillRunRecord,
+    SourcePackage,
     SourceRef,
     TestCase,
     TestCaseStatus,
@@ -33,12 +34,14 @@ from ai_testgen.skill_runtime import (
     validate_skill_definition,
 )
 from ai_testgen.skill_runtime_config import create_skill_runtime_for_run
+from ai_testgen.source_ledger import SOURCE_PACKAGE_ARTIFACT_NAME, SOURCE_PACKAGE_STAGE
 from ai_testgen.validators import validate_obligation_links, validate_test_case_links
 
 
 DRAFT_TESTS_STAGE = "07_draft_tests"
 DRAFT_TEST_SUITE_ARTIFACT_NAME = "draft_test_suite"
 RAW_DRAFT_TEST_SUITE_ARTIFACT_NAME = "draft_test_suite_skill_output"
+ORACLE_INPUT_DRAFT_TEST_SUITE_ARTIFACT_NAME = "draft_test_suite_oracle_input"
 ORACLE_DRAFT_TEST_SUITE_ARTIFACT_NAME = "draft_test_suite_oracle_output"
 TEST_GENERATION_INPUT_ARTIFACT_NAME = "test_generation_input"
 DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH = Path("skills") / "test_case_writer_v1.json"
@@ -112,6 +115,7 @@ def generate_tests_from_obligation_ledger_artifact(
         )
     governed_ledger = _load_governed_ledger(store, project_id=project_id, run_id=run_id)
     _validate_obligation_ledger_against_governed(obligation_ledger, governed_ledger)
+    source_package = _load_source_package_if_present(store, project_id=project_id, run_id=run_id)
 
     writer_definition = _load_test_generation_skill_definition(
         DEFAULT_TEST_CASE_WRITER_SKILL_DEFINITION_PATH
@@ -147,6 +151,7 @@ def generate_tests_from_obligation_ledger_artifact(
             obligation_ledger,
             batch,
             governed_ledger,
+            source_package,
         )
         bounded_artifact = _write_generation_input_obligations(
             store,
@@ -188,6 +193,17 @@ def generate_tests_from_obligation_ledger_artifact(
             version=writer_output_version,
         )
         validate_draft_suite_against_inputs(writer_suite, bounded_obligations, governed_ledger)
+        oracle_input_suite = _draft_suite_with_oracle_context(
+            writer_suite,
+            bounded_obligations,
+            governed_ledger,
+            source_package,
+        )
+        oracle_input_artifact = _write_oracle_input_draft_suite(
+            store,
+            run_id=run_id,
+            draft_suite=oracle_input_suite,
+        )
 
         oracle_output_path, oracle_output_version = _next_artifact_path(
             store,
@@ -209,7 +225,7 @@ def generate_tests_from_obligation_ledger_artifact(
         try:
             oracle_record = runtime.run_skill(
                 oracle_definition,
-                input_artifact_paths=[writer_output_path],
+                input_artifact_paths=[oracle_input_artifact.path],
                 output_artifact_paths=[oracle_output_path],
                 skill_run_id=oracle_run_id,
             )
@@ -368,6 +384,26 @@ def _load_governed_ledger(
         raise GovernedLedgerArtifactError(f"Failed to load GovernedRequirementLedger artifact: {exc}") from exc
 
 
+def _load_source_package_if_present(
+    store: ArtifactStore,
+    *,
+    project_id: str,
+    run_id: str,
+) -> SourcePackage | None:
+    if not store.exists(project_id, run_id, SOURCE_PACKAGE_STAGE, SOURCE_PACKAGE_ARTIFACT_NAME):
+        return None
+    try:
+        return store.load_model(
+            SourcePackage,
+            project_id,
+            run_id,
+            SOURCE_PACKAGE_STAGE,
+            SOURCE_PACKAGE_ARTIFACT_NAME,
+        )
+    except (ArtifactStoreError, SchemaValidationError) as exc:
+        raise TestObligationLedgerArtifactError(f"Failed to load SourcePackage artifact: {exc}") from exc
+
+
 def _load_draft_suite(
     store: ArtifactStore,
     *,
@@ -387,6 +423,24 @@ def _load_draft_suite(
         )
     except (ArtifactStoreError, SchemaValidationError) as exc:
         raise InvalidDraftTestSuiteError(f"Failed to load DraftTestSuite artifact: {exc}") from exc
+
+
+def _write_oracle_input_draft_suite(
+    store: ArtifactStore,
+    *,
+    run_id: str,
+    draft_suite: DraftTestSuite,
+):
+    try:
+        return store.write_json(
+            draft_suite.project_id,
+            run_id,
+            DRAFT_TESTS_STAGE,
+            ORACLE_INPUT_DRAFT_TEST_SUITE_ARTIFACT_NAME,
+            draft_suite,
+        )
+    except ArtifactStoreError as exc:
+        raise TestGenerationPersistenceError(f"Failed to save oracle input DraftTestSuite artifact: {exc}") from exc
 
 
 def _write_generation_input_obligations(
@@ -440,17 +494,62 @@ def _obligation_ledger_with_obligations(
     obligation_ledger: TestObligationLedger,
     obligations: list[TestObligation],
     governed_ledger: GovernedRequirementLedger,
+    source_package: SourcePackage | None = None,
 ) -> TestObligationLedger:
-    linked_requirements = _linked_requirements_for_obligations(obligations, governed_ledger)
     data = obligation_ledger.to_dict()
     data["obligations"] = [obligation.to_dict() for obligation in obligations]
-    data["metadata"] = {
-        "linked_requirements": [requirement.to_dict() for requirement in linked_requirements],
-    }
+    data["metadata"] = _generation_context_metadata(
+        obligations,
+        governed_ledger,
+        source_package,
+    )
     try:
         return TestObligationLedger.from_dict(data)
     except SchemaValidationError as exc:
         raise TestObligationLedgerArtifactError(f"Invalid bounded TestObligationLedger data: {exc}") from exc
+
+
+def _draft_suite_with_oracle_context(
+    draft_suite: DraftTestSuite,
+    obligation_ledger: TestObligationLedger,
+    governed_ledger: GovernedRequirementLedger,
+    source_package: SourcePackage | None,
+) -> DraftTestSuite:
+    data = draft_suite.to_dict()
+    metadata = dict(data.get("metadata") or {})
+    metadata.update(
+        _generation_context_metadata(
+            obligation_ledger.obligations,
+            governed_ledger,
+            source_package,
+            include_obligations=True,
+        )
+    )
+    data["metadata"] = metadata
+    try:
+        return DraftTestSuite.from_dict(data)
+    except SchemaValidationError as exc:
+        raise InvalidDraftTestSuiteError(f"Invalid oracle input DraftTestSuite data: {exc}") from exc
+
+
+def _generation_context_metadata(
+    obligations: list[TestObligation],
+    governed_ledger: GovernedRequirementLedger,
+    source_package: SourcePackage | None,
+    *,
+    include_obligations: bool = False,
+) -> dict:
+    metadata: dict[str, object] = {}
+    if include_obligations:
+        metadata["linked_obligations"] = [obligation.to_dict() for obligation in obligations]
+    metadata["linked_requirements"] = [
+        requirement.to_dict()
+        for requirement in _linked_requirements_for_obligations(obligations, governed_ledger)
+    ]
+    linked_source_chunks = _linked_source_chunks_for_obligations(obligations, source_package)
+    if linked_source_chunks:
+        metadata["linked_source_chunks"] = linked_source_chunks
+    return metadata
 
 
 def _linked_requirements_for_obligations(
@@ -474,6 +573,32 @@ def _linked_requirements_for_obligations(
             linked.append(requirement)
             seen.add(requirement.requirement_id)
     return linked
+
+
+def _linked_source_chunks_for_obligations(
+    obligations: list[TestObligation],
+    source_package: SourcePackage | None,
+) -> list[dict]:
+    if source_package is None:
+        return []
+
+    chunks_by_ref = {
+        (chunk.document_id, chunk.chunk_id): chunk
+        for chunk in source_package.chunks
+    }
+    linked_chunks: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for obligation in obligations:
+        for source_ref in obligation.source_refs:
+            if source_ref.chunk_id is None:
+                continue
+            key = (source_ref.document_id, source_ref.chunk_id)
+            chunk = chunks_by_ref.get(key)
+            if chunk is None or key in seen:
+                continue
+            linked_chunks.append(chunk.to_dict())
+            seen.add(key)
+    return linked_chunks
 
 
 def _merge_draft_suites_with_deterministic_ids(

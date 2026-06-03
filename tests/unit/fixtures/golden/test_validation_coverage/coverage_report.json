@@ -1,34 +1,33 @@
 {
   "coverage_report_id": "coverage_001",
   "obligation_counts": {
-    "blocked": 1,
+    "blocked": 0,
     "covered": 1,
-    "skipped": 0,
+    "skipped": 1,
     "total": 2,
     "uncovered": 0
   },
   "project_id": "demo_chatbot",
   "requirement_counts": {
     "covered": 1,
+    "skipped": 1,
     "total": 2,
-    "uncovered": 1
+    "uncovered": 0
   },
   "source_chunk_counts": {
     "covered": 1,
-    "total": 3,
-    "uncovered": 1,
+    "skipped": 1,
+    "total": 2,
+    "uncovered": 0,
     "with_requirements": 2,
-    "without_requirements": 1
+    "without_requirements": 0
   },
   "test_counts": {
     "export_eligible": 1,
-    "needs_review": 1,
-    "rejected": 1,
-    "total": 3,
+    "needs_review": 4,
+    "rejected": 0,
+    "total": 5,
     "valid": 1
   },
-  "uncovered_requirement_ids": [
-    "req_002"
-  ],
   "validated_suite_id": "validated_suite_001"
 }
